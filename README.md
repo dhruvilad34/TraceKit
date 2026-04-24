@@ -74,7 +74,7 @@ Then go to **Settings → Pages → Deploy from branch → main** in your GitHub
 
 Your app will be live at:
 ```
-https://dhruvilad34.github.io/pharmatrace/pharmatrace.html
+https://dhruvilad34.github.io/PharmaTrace/
 ```
 
 ## Project Structure
