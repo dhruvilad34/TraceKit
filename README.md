@@ -1,4 +1,4 @@
-# PharmaTrace
+# TraceKit
 
 **Pharmaceutical Batch Record & Traceability Platform**
 
@@ -6,7 +6,7 @@ A browser-based tool that simulates the core workflow of pharmaceutical Manufact
 
 ## Overview
 
-PharmaTrace was built to demonstrate hands-on understanding of pharmaceutical manufacturing processes, GMP documentation standards, and MES architecture specifically the workflows used in systems like Werum PAS-X. It mirrors real responsibilities in pharmaceutical process engineering and MES recipe design roles.
+TraceKit was built to demonstrate hands-on understanding of pharmaceutical manufacturing processes, GMP documentation standards, and MES architecture specifically the workflows used in systems like Werum PAS-X. It mirrors real responsibilities in pharmaceutical process engineering and MES recipe design roles.
 
 ## Features
 
