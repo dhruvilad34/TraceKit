@@ -31,7 +31,7 @@ The project was built to demonstrate applied computing skills across workflow de
 
 ## Live Demo
 
-🔗 **[dhruvilad34.github.io/tracekit](https://dhruvilad34.github.io/tracekit/)**
+🔗 **[dhruvilad34.github.io/TraceKit](https://dhruvilad34.github.io/TraceKit/)**
 
 > Open in any modern browser — no installation, no login required.
 
@@ -93,7 +93,7 @@ The project was built to demonstrate applied computing skills across workflow de
 
 ```bash
 # Clone the repository
-git clone https://github.com/dhruvilad34/tracekit.git
+git clone https://github.com/dhruvilad34/TraceKit.git
 
 # Navigate into the folder
 cd tracekit
@@ -112,7 +112,7 @@ npx serve .
 git init
 git add tracekit.html README.md
 git commit -m "Initial release: TraceKit v1.0"
-git remote add origin https://github.com/dhruvilad34/tracekit.git
+git remote add origin https://github.com/dhruvilad34/TraceKit.git
 git push -u origin main
 ```
 
@@ -124,7 +124,7 @@ Then in your GitHub repository:
 
 Live at:
 ```
-https://dhruvilad34.github.io/tracekit/
+https://dhruvilad34.github.io/TraceKit/
 ```
 
 ---
