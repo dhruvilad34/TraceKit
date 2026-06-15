@@ -1,0 +1,2555 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║  TraceKit v2 — Pharma MES Recipe Designer                   ║
+  ║  Author : Dhruvi Lad                                         ║
+  ║                                                              ║
+  ║                 ║
+  ║                                                              ║
+  ║  TABS:                                                       ║
+  ║   1. Recipe Builder  — build MBR steps with PVL             ║
+  ║   2. EBR Execution   — run a batch, sign off electronically  ║
+  ║   3. Traceability    — map steps to paper formula refs       ║
+  ║   4. Equipment States— ESP state diagrams per equipment      ║
+  ║   5. Audit Trail     — immutable log of every action        ║
+  ║   6. Dashboard       — KPIs + Pareto charts                  ║
+  ║                                                              ║
+  ║  TO ADD A NEW TAB:                                           ║
+  ║   1. Add <button class="tab"> in the header nav             ║
+  ║   2. Add <div id="tab-xxx"> panel below                     ║
+  ║   3. Add 'xxx' to tabs array in switchTab()                 ║
+  ║   4. Add renderXxx() call in switchTab()                    ║
+  ╚══════════════════════════════════════════════════════════════╝
+-->
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TraceKit v2 – MES Recipe Designer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  /*
+    ┌─────────────────────────────────────────────┐
+    │  CSS CUSTOM PROPERTIES (Design Tokens)      │
+    │  Change colours here — they update globally │
+    │  --brand : main blue (header, buttons)      │
+    │  --danger : red (critical steps, errors)    │
+    │  --warning: amber (flags, pending states)   │
+    │  --success: green (verified, approved)      │
+    └─────────────────────────────────────────────┘
+  */
+  :root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-tertiary: #f1f3f5;
+    --text-primary: #1a1a2e;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --border: #e5e7eb;
+    --border-hover: #d1d5db;
+    --brand: #0A3D6B;
+    --brand-light: #e8f0fe;
+    --brand-hover: #0c4a82;
+    --danger: #dc2626;
+    --danger-bg: #fee2e2;
+    --warning: #0A3D6B;
+    --warning-bg: #fffbeb;
+    --success: #0A3D6B;
+    --success-bg: #dcfce7;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  }
+
+  /*
+    Dark mode — automatically activates based on OS setting.
+    To FORCE dark mode always: add class="dark" to <html> and
+    change this media query to .dark :root { ... }
+  */
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg-primary: #1a1b23;
+      --bg-secondary: #22242e;
+      --bg-tertiary: #2a2c38;
+      --text-primary: #e8e9f0;
+      --text-secondary: #9b9dac;
+      --text-muted: #6b6d7c;
+      --border: #2e3042;
+      --border-hover: #3d4058;
+      --brand: #4a90d9;
+      --brand-light: #1a2a3e;
+      --brand-hover: #5ba0e8;
+      --danger-bg: #3b1212;
+      --warning-bg: #2d2000;
+      --success-bg: #0d2b1a;
+    }
+  }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    background: var(--brand);
+    color: #fff;
+    padding: 0 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 52px;
+    flex-shrink: 0;
+    box-shadow: var(--shadow-md);
+  }
+  .logo {
+    width: 32px; height: 32px;
+    background: rgba(255,255,255,0.15);
+    border-radius: var(--radius-md);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .logo svg { width: 18px; height: 18px; }
+  .header-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .header-sub { font-size: 11px; opacity: 0.7; margin-top: 1px; }
+  .tabs { display: flex; gap: 2px; margin-left: auto; }
+  .tab {
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    color: rgba(255,255,255,0.7);
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--font);
+    transition: all 0.15s;
+  }
+  .tab:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  .tab.active { background: rgba(255,255,255,0.2); color: #fff; font-weight: 500; }
+
+  /* ── MAIN LAYOUT ── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: 192px;
+    flex-shrink: 0;
+    background: var(--bg-primary);
+    border-right: 1px solid var(--border);
+    padding: 12px 8px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .sidebar-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 8px 8px 4px;
+    margin-top: 4px;
+  }
+  .sidebar-label:first-child { margin-top: 0; }
+  .op-btn {
+    display: flex; align-items: center; gap: 9px;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-primary);
+    font-family: var(--font);
+    transition: all 0.12s;
+    text-align: left;
+    width: 100%;
+  }
+  .op-btn:hover { background: var(--bg-secondary); border-color: var(--border); }
+  .op-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── CANVAS ── */
+  .canvas-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    background: var(--bg-tertiary);
+  }
+  .canvas-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .mbr-meta {
+    display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
+  }
+  .mbr-meta-field {
+    display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 130px;
+  }
+  .mbr-meta-label {
+    font-size: 10px; font-weight: 600; color: var(--text-muted);
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .mbr-meta-input {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-family: var(--font);
+    outline: none;
+  }
+  .mbr-meta-input:focus { border-color: var(--brand); }
+  .mbr-title-input {
+    flex: 1;
+    font-size: 17px;
+    font-weight: 600;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 14px;
+    outline: none;
+    color: var(--text-primary);
+    font-family: var(--font);
+    min-width: 200px;
+  }
+  .mbr-title-input:focus { border-color: var(--brand); }
+
+  /* MBR status bar */
+  .mbr-status-bar {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 14px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px; font-weight: 600;
+    cursor: pointer; border: none; font-family: var(--font);
+    transition: opacity 0.15s;
+  }
+  .status-pill:hover { opacity: 0.8; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .status-draft { background: #f1f5f9; color: #475569; }
+  .status-review { background: var(--warning-bg); color: var(--warning); }
+  .status-approved { background: var(--success-bg); color: var(--success); }
+  .status-obsolete { background: var(--danger-bg); color: var(--danger); }
+  .status-label { font-size: 11px; color: var(--text-muted); margin-right: 4px; }
+
+  .btn {
+    padding: 7px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--font);
+    color: var(--text-primary);
+    transition: all 0.12s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--bg-secondary); border-color: var(--border-hover); }
+  .btn-primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .btn-primary:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
+  .btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+  .btn-warning { background: var(--warning); color: #fff; border-color: var(--warning); }
+  .btn-success { background: #16a34a; color: #fff; border-color: #16a34a; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+  /* ── STEP CARDS ── */
+  .steps-list { display: flex; flex-direction: column; }
+  .step-card {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 0;
+    position: relative;
+  }
+  .step-card.has-deviation { border-left: 3px solid var(--danger); }
+  .connector {
+    display: flex; align-items: center; justify-content: flex-start;
+    padding-left: 30px;
+    height: 22px;
+  }
+  .connector-line { width: 1.5px; height: 22px; background: var(--border); }
+  .step-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .step-num {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    flex-shrink: 0; color: #fff;
+  }
+  .step-badge {
+    font-size: 10px; padding: 3px 8px;
+    border-radius: 20px; font-weight: 600;
+    white-space: nowrap;
+  }
+  .step-title-input {
+    flex: 1;
+    background: transparent; border: none; outline: none;
+    font-size: 13px; font-weight: 500;
+    font-family: var(--font);
+    color: var(--text-primary);
+  }
+  .step-title-input::placeholder { color: var(--text-muted); font-weight: 400; }
+
+  /* critical + double-check badges */
+  .step-flags { display: flex; gap: 5px; align-items: center; margin-left: auto; flex-shrink: 0; }
+  .flag-btn {
+    padding: 2px 8px; border-radius: 20px;
+    font-size: 10px; font-weight: 600;
+    cursor: pointer; border: 1px solid transparent;
+    font-family: var(--font); transition: all 0.12s;
+    white-space: nowrap;
+  }
+  .flag-btn.critical-on { background: var(--danger-bg); color: var(--danger); border-color: #fca5a5; }
+  .flag-btn.critical-off { background: var(--bg-secondary); color: var(--text-muted); border-color: var(--border); }
+  .flag-btn.dbl-on { background: var(--warning-bg); color: var(--warning); border-color: #fcd34d; }
+  .flag-btn.dbl-off { background: var(--bg-secondary); color: var(--text-muted); border-color: var(--border); }
+
+  .step-body {
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field.full { grid-column: 1 / -1; }
+  .field-lbl {
+    font-size: 10px; font-weight: 600;
+    color: var(--text-muted); letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .field-inp {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: var(--font); font-size: 12px;
+    outline: none; transition: border-color 0.12s;
+  }
+  .field-inp:focus { border-color: var(--brand); background: var(--bg-primary); }
+
+  /* PVL inline row */
+  .pvl-section {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+  .pvl-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .pvl-title { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .pvl-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .pvl-table th { text-align: left; padding: 4px 8px; color: var(--text-muted); font-weight: 600; font-size: 10px; text-transform: uppercase; }
+  .pvl-table td { padding: 4px 6px; }
+  .pvl-inp {
+    width: 100%; padding: 3px 6px; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--bg-primary);
+    color: var(--text-primary); font-size: 11px; font-family: var(--font); outline: none;
+  }
+  .pvl-inp:focus { border-color: var(--brand); }
+
+  /* Deviation inline */
+  .deviation-section {
+    padding: 10px 14px;
+    border-top: 1px solid var(--border);
+    background: #fff8f8;
+  }
+  @media (prefers-color-scheme: dark) { .deviation-section { background: #2a1a1a; } }
+  .deviation-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .deviation-title { font-size: 10px; font-weight: 700; color: var(--danger); text-transform: uppercase; letter-spacing: 0.06em; }
+  .deviation-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+  .deviation-full { grid-column: 1 / -1; }
+
+  .step-footer {
+    padding: 8px 14px; border-top: 1px solid var(--border);
+    display: flex; gap: 6px; align-items: center;
+  }
+  .btn-ghost {
+    padding: 4px 10px; border-radius: var(--radius-sm);
+    border: none; background: none; cursor: pointer;
+    font-size: 11px; color: var(--text-muted);
+    font-family: var(--font); transition: all 0.12s;
+  }
+  .btn-ghost:hover { background: var(--bg-secondary); color: var(--text-primary); }
+  .btn-ghost.danger:hover { background: var(--danger-bg); color: var(--danger); }
+  .btn-ghost.warn:hover { background: var(--warning-bg); color: var(--warning); }
+
+  /* Deviation count badge */
+  .dev-count {
+    margin-left: auto;
+    font-size: 10px; padding: 2px 7px;
+    border-radius: 20px; font-weight: 600;
+    background: var(--danger-bg); color: var(--danger);
+    display: none;
+  }
+  .dev-count.visible { display: inline-block; }
+
+  /* ── EMPTY STATE ── */
+  .empty {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 60px 20px;
+    color: var(--text-muted); text-align: center; gap: 10px;
+    background: var(--bg-primary); border-radius: var(--radius-lg);
+    border: 1px dashed var(--border);
+  }
+  .empty-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: var(--bg-secondary); display: flex;
+    align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+
+  /* ── AI PANEL ── */
+  .ai-panel {
+    width: 256px; flex-shrink: 0;
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    background: var(--bg-primary);
+  }
+  .ai-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; font-weight: 600;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .ai-pulse {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #22c55e;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.9)} }
+  .ai-body { flex: 1; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+  .ai-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+  .ai-textarea {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: var(--font); font-size: 12px;
+    resize: none; height: 90px; outline: none;
+    transition: border-color 0.12s;
+  }
+  .ai-textarea:focus { border-color: var(--brand); }
+  .ai-result {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    font-size: 11px; line-height: 1.65;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    white-space: pre-wrap;
+    display: none;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .ai-loading {
+    display: none; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--text-secondary);
+  }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 1.5px solid var(--border-hover);
+    border-top-color: var(--brand);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── TAB PANELS ── */
+  .tab-panel { flex: 1; padding: 20px; overflow-y: auto; background: var(--bg-tertiary); }
+  .tab-panel-header {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 16px; gap: 12px;
+  }
+  .panel-title { font-size: 16px; font-weight: 600; }
+  .panel-sub { font-size: 12px; color: var(--text-secondary); margin-top: 3px; }
+  .table-wrap { background: var(--bg-primary); border-radius: var(--radius-lg); border: 1px solid var(--border); overflow: hidden; box-shadow: var(--shadow-sm); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead th {
+    padding: 9px 14px; text-align: left;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    font-weight: 600; font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  tbody td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--bg-secondary); }
+  .badge {
+    display: inline-block; padding: 2px 8px;
+    border-radius: 20px; font-size: 10px; font-weight: 600;
+  }
+  .badge-verified { background: var(--success-bg); color: var(--success); }
+  .badge-review   { background: var(--warning-bg); color: var(--warning); }
+  .badge-pending  { background: #f1f5f9; color: #475569; }
+  .badge-critical { background: var(--danger-bg); color: var(--danger); }
+  @media (prefers-color-scheme: dark) {
+    .badge-verified { background: #14532d; color: #86efac; }
+    .badge-review   { background: #422006; color: #fde68a; }
+    .badge-pending  { background: #1e293b; color: #94a3b8; }
+    .badge-critical { background: #3b1212; color: #fca5a5; }
+  }
+
+  /* ── EBR TAB ── */
+  .ebr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+  .ebr-card {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .ebr-card-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .form-label { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .form-input {
+    padding: 7px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg-secondary);
+    color: var(--text-primary); font-family: var(--font); font-size: 12px; outline: none;
+  }
+  .form-input:focus { border-color: var(--brand); }
+  .form-select {
+    padding: 7px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--bg-secondary);
+    color: var(--text-primary); font-family: var(--font); font-size: 12px; outline: none;
+    cursor: pointer;
+  }
+  .signoff-row {
+    display: flex; gap: 8px; align-items: center;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    background: var(--bg-secondary);
+  }
+  .signoff-icon { font-size: 14px; }
+  .signoff-info { flex: 1; }
+  .signoff-role { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; }
+  .signoff-name { font-size: 12px; color: var(--text-primary); margin-top: 1px; }
+  .signoff-time { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+
+
+
+  /* ── AUDIT TRAIL ── */
+  .audit-entry {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .audit-entry:last-child { border-bottom: none; }
+  .audit-time { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; width: 75px; margin-top: 1px; }
+  .audit-action {
+    padding: 1px 7px; border-radius: 4px;
+    font-size: 10px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .audit-INSERT { background: var(--success-bg); color: var(--success); }
+  .audit-UPDATE { background: var(--brand-light); color: var(--brand); }
+  .audit-DELETE { background: var(--danger-bg); color: var(--danger); }
+  .audit-SIGNOFF { background: var(--warning-bg); color: var(--warning); }
+  .audit-desc { flex: 1; color: var(--text-primary); line-height: 1.4; }
+  .audit-user { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ── DASHBOARD TAB ── */
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  .kpi-card {
+    background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .kpi-label { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .kpi-value { font-size: 28px; font-weight: 700; color: var(--text-primary); line-height: 1; }
+  .kpi-sub { font-size: 11px; color: var(--text-secondary); margin-top: 4px; }
+  .kpi-danger .kpi-value { color: var(--danger); }
+  .kpi-success .kpi-value { color: var(--success); }
+  .kpi-warn .kpi-value { color: var(--warning); }
+
+  /* Pareto chart */
+  .pareto-wrap {
+    background: var(--bg-primary); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px;
+    box-shadow: var(--shadow-sm); margin-bottom: 16px;
+  }
+  .pareto-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .pareto-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 11px; }
+  .pareto-label { width: 100px; text-align: right; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pareto-bar-bg { flex: 1; height: 18px; background: var(--bg-secondary); border-radius: 4px; overflow: hidden; }
+  .pareto-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
+  .pareto-count { width: 30px; text-align: right; font-weight: 600; color: var(--text-primary); }
+
+  /* ── EQUIPMENT STATE TAB ── */
+  .eqm-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .eqm-card {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 14px;
+    box-shadow: var(--shadow-sm);
+  }
+  .eqm-name { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+  .state-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 4px; }
+  .state-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .state-arrow { color: var(--text-muted); font-size: 10px; margin-left: 16px; margin-bottom: 2px; display: block; }
+
+  /* ── EXPORT MODAL ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 200; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    width: 600px; max-width: 92vw;
+    max-height: 85vh;
+    display: flex; flex-direction: column;
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-title { font-size: 14px; font-weight: 600; }
+  .modal-body { padding: 16px 20px; flex: 1; overflow: auto; }
+  .code-block {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    font-family: var(--font-mono);
+    font-size: 11px; line-height: 1.6;
+    white-space: pre; overflow: auto;
+    border: 1px solid var(--border);
+    max-height: 480px;
+    color: var(--text-primary);
+  }
+  .modal-footer { padding: 12px 20px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+
+  /* ── NOTIFICATION TOAST ── */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--text-primary); color: var(--bg-primary);
+    padding: 10px 16px; border-radius: var(--radius-md);
+    font-size: 12px; font-weight: 500;
+    z-index: 300; opacity: 0; transform: translateY(8px);
+    transition: all 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+
+</style>
+</head>
+<body>
+
+<!-- ═══════════ HEADER ═══════════ -->
+<header class="header">
+  <div class="logo">
+    <svg viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="7" height="7" rx="1.5" fill="white" opacity="0.95"/>
+      <rect x="10" y="1" width="7" height="7" rx="1.5" fill="white" opacity="0.6"/>
+      <rect x="1" y="10" width="7" height="7" rx="1.5" fill="white" opacity="0.6"/>
+      <rect x="10" y="10" width="7" height="7" rx="1.5" fill="white" opacity="0.3"/>
+    </svg>
+  </div>
+  <div>
+    <div class="header-title">TraceKit v2</div>
+    <div class="header-sub">MES Recipe Designer — GMP Batch Record Platform</div>
+  </div>
+  <nav class="tabs">
+    <button class="tab active" onclick="switchTab('recipe')">Recipe Builder</button>
+    <button class="tab" onclick="switchTab('ebr')">EBR Execution</button>
+    <button class="tab" onclick="switchTab('trace')">Traceability</button>
+    <button class="tab" onclick="switchTab('eqm')">Equipment States</button>
+    <button class="tab" onclick="switchTab('audit')">Audit Trail</button>
+    <button class="tab" onclick="switchTab('dashboard')">Dashboard</button>
+  </nav>
+</header>
+
+
+<!-- ═══════════ RECIPE BUILDER TAB ═══════════ -->
+<div id="tab-recipe" class="main">
+
+  <!--
+    ┌─────────────────────────────────────────────┐
+    │  SIDEBAR — Operation Type Buttons           │
+    │  Each button calls addStep('type')          │
+    │  TO ADD A NEW OPERATION:                    │
+    │    1. Add entry to STEPS_CFG in JS          │
+    │    2. Add entry to STEP_FIELDS in JS        │
+    │    3. Add <button> here                     │
+    └─────────────────────────────────────────────┘
+  -->
+  <aside class="sidebar">
+    <div class="sidebar-label">Compounding</div>
+    <button class="op-btn" onclick="addStep('dispense')"><span class="op-dot" style="background:#2563eb"></span> Dispense</button>
+    <button class="op-btn" onclick="addStep('mix')"><span class="op-dot" style="background:#7c3aed"></span> Mix / Blend</button>
+    <button class="op-btn" onclick="addStep('granulate')"><span class="op-dot" style="background:#0891b2"></span> Granulate</button>
+    <button class="op-btn" onclick="addStep('dry')"><span class="op-dot" style="background:#d97706"></span> Dry</button>
+    <button class="op-btn" onclick="addStep('mill')"><span class="op-dot" style="background:#059669"></span> Mill</button>
+    <button class="op-btn" onclick="addStep('lubricate')"><span class="op-dot" style="background:#65a30d"></span> Lubricate</button>
+    <div class="sidebar-label">Compression</div>
+    <button class="op-btn" onclick="addStep('compress')"><span class="op-dot" style="background:#dc2626"></span> Compress</button>
+    <button class="op-btn" onclick="addStep('coat')"><span class="op-dot" style="background:#db2777"></span> Coat</button>
+    <div class="sidebar-label">Packaging</div>
+    <button class="op-btn" onclick="addStep('inspect')"><span class="op-dot" style="background:#6d28d9"></span> IPC Inspect</button>
+    <button class="op-btn" onclick="addStep('pack')"><span class="op-dot" style="background:#0f766e"></span> Pack / Label</button>
+    <div class="sidebar-label">Utility</div>
+    <button class="op-btn" onclick="addStep('hold')"><span class="op-dot" style="background:#92400e"></span> Hold / Wait</button>
+    <button class="op-btn" onclick="addStep('sample')"><span class="op-dot" style="background:#374151"></span> Sample / QC</button>
+  </aside>
+
+  <!--
+    ┌─────────────────────────────────────────────┐
+    │  MAIN CANVAS — Recipe Builder               │
+    │  Contains:                                  │
+    │   - MBR title input                         │
+    │   - Metadata fields (product, version etc.) │
+    │   - Status bar (Draft→Review→Approved)      │
+    │   - Steps list (built by renderSteps())     │
+    └─────────────────────────────────────────────┘
+  -->
+  <main class="canvas-area">
+    <div class="canvas-header">
+      <input class="mbr-title-input" id="mbr-title"
+        value="Metformin HCl 500mg Tablets – MBR-2024-001"
+        placeholder="Enter Master Batch Record title..."
+        onchange="logAudit('UPDATE','batch_record','MBR title updated','system')">
+      <button class="btn" onclick="triggerImport()">⬆ Import JSON</button>
+      <input type="file" id="import-file" accept=".json" style="display:none" onchange="importJSON(event)">
+      <button class="btn" onclick="clearAll()">Clear all</button>
+      <button class="btn btn-primary" onclick="showExport('mbr')">Export MBR JSON</button>
+    </div>
+
+    <!-- MBR Metadata -->
+    <div class="mbr-meta">
+      <div class="mbr-meta-field">
+        <div class="mbr-meta-label">Product Code</div>
+        <input class="mbr-meta-input" id="product-code" value="MET-500-TAB" placeholder="e.g. MET-500-TAB">
+      </div>
+      <div class="mbr-meta-field">
+        <div class="mbr-meta-label">Version</div>
+        <input class="mbr-meta-input" id="mbr-version" value="1.0" placeholder="1.0">
+      </div>
+      <div class="mbr-meta-field">
+        <div class="mbr-meta-label">Batch Size</div>
+        <input class="mbr-meta-input" id="batch-size" value="100 kg" placeholder="e.g. 100 kg">
+      </div>
+      <div class="mbr-meta-field">
+        <div class="mbr-meta-label">Author</div>
+        <input class="mbr-meta-input" id="mbr-author" value="Dhruvi Lad" placeholder="Your name">
+      </div>
+    </div>
+
+    <!-- MBR Status Bar -->
+    <div class="mbr-status-bar">
+      <span class="status-label">STATUS:</span>
+      <button class="status-pill status-draft" id="status-draft" onclick="setMBRStatus('draft')">
+        <span class="status-dot" style="background:#94a3b8"></span> Draft
+      </button>
+      <button class="status-pill status-review" id="status-review" onclick="setMBRStatus('under_review')">
+        <span class="status-dot" style="background:#d97706"></span> Under Review
+      </button>
+      <button class="status-pill status-approved" id="status-approved" onclick="setMBRStatus('approved')">
+        <span class="status-dot" style="background:#22c55e"></span> Approved
+      </button>
+      <button class="status-pill status-obsolete" id="status-obsolete" onclick="setMBRStatus('obsolete')">
+        <span class="status-dot" style="background:#dc2626"></span> Obsolete
+      </button>
+      <span id="current-status-label" style="margin-left:auto;font-size:11px;color:var(--text-muted)">Current: <strong>Draft</strong></span>
+    </div>
+
+    <div class="steps-list" id="steps-list"></div>
+    <div class="empty" id="empty-state" style="display:none;">
+      <div class="empty-icon">⬡</div>
+      <div style="font-size:13px;font-weight:600;">No steps added yet</div>
+      <div style="font-size:12px;">Click an operation from the left sidebar to build your batch record</div>
+    </div>
+  </main>
+
+  <!--
+    ┌─────────────────────────────────────────────┐
+    │  AI PARAMETER ASSISTANT PANEL               │
+    │  Right-side panel on Recipe Builder tab     │
+    │  Calls Claude API or falls back to mock     │
+    │  responses if no API key is present         │
+    └─────────────────────────────────────────────┘
+  -->
+  <aside class="ai-panel">
+    <div class="ai-header">
+      <div class="ai-pulse"></div>
+      AI Parameter Assistant
+    </div>
+    <div class="ai-body">
+      <div class="ai-desc">Describe a manufacturing step and the AI will suggest GMP-compliant parameters for your batch record.</div>
+      <textarea class="ai-textarea" id="ai-input"
+        placeholder="e.g. Wet granulation for Metformin HCl 500mg using Diosna P600 high shear granulator, 100kg batch size..."></textarea>
+      <button class="btn btn-primary" onclick="runAI()" style="width:100%;">Generate Parameters →</button>
+      <div class="ai-loading" id="ai-loading">
+        <div class="spinner"></div>
+        <span>Generating parameters...</span>
+      </div>
+      <div class="ai-result" id="ai-result"></div>
+      <button class="btn" id="ai-add-btn" onclick="addFromAI()" style="width:100%;display:none;">+ Add as Step</button>
+    </div>
+  </aside>
+</div>
+
+<!-- ═══════════ EBR EXECUTION TAB ═══════════ -->
+<div id="tab-ebr" class="main" style="display:none;">
+  <div class="tab-panel">
+    <div class="tab-panel-header">
+      <div>
+        <div class="panel-title">Executed Batch Record (EBR)</div>
+        <div class="panel-sub">Instantiate a production run from the Master Batch Record above</div>
+      </div>
+      <button class="btn btn-primary" onclick="showExport('ebr')">Export EBR JSON</button>
+    </div>
+    <div class="ebr-grid">
+      <!-- EBR Setup -->
+      <div class="ebr-card">
+        <div class="ebr-card-title"> Batch Execution Details</div>
+        <div class="form-row">
+          <div class="form-label">Lot Number</div>
+          <input class="form-input" id="ebr-lot" placeholder="e.g. LOT-2026-001" value="LOT-2026-001">
+        </div>
+        <div class="form-row">
+          <div class="form-label">Actual Batch Size</div>
+          <input class="form-input" id="ebr-size" placeholder="e.g. 98.5 kg" value="98.5 kg">
+        </div>
+        <div class="form-row">
+          <div class="form-label">Operator Name</div>
+          <input class="form-input" id="ebr-operator" placeholder="Operator name" value="Dhruvi Lad">
+        </div>
+        <div class="form-row">
+          <div class="form-label">Manufacturing Date</div>
+          <input class="form-input" id="ebr-date" type="date">
+        </div>
+        <div class="form-row">
+          <div class="form-label">EBR Status</div>
+          <select class="form-select" id="ebr-status" onchange="logAudit('UPDATE','ebr','EBR status changed to '+this.value,document.getElementById('ebr-operator').value)">
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" style="width:100%;margin-top:4px" onclick="createEBR()">
+          ▶ Execute MBR as Batch Run
+        </button>
+      </div>
+
+      <!-- e-Signature / Sign-off (21 CFR Part 11) -->
+      <div class="ebr-card">
+        <div class="ebr-card-title">✍️ Electronic Sign-off <span style="font-size:10px;color:var(--text-muted);font-weight:400">(21 CFR Part 11)</span></div>
+        <div id="signoff-list">
+          <div style="font-size:12px;color:var(--text-muted);padding:8px 0;">No sign-offs recorded yet. Execute a batch first.</div>
+        </div>
+        <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px;">
+          <div class="form-row">
+            <div class="form-label">Reviewer Name</div>
+            <input class="form-input" id="signoff-reviewer" placeholder="Reviewer full name">
+          </div>
+          <button class="btn btn-warning" style="width:100%;margin-bottom:8px" onclick="addSignoff('Reviewed')">
+            ✓ Reviewer Sign-off
+          </button>
+          <div class="form-row">
+            <div class="form-label">Approver Name</div>
+            <input class="form-input" id="signoff-approver" placeholder="Approver full name">
+          </div>
+          <button class="btn btn-success" style="width:100%" onclick="addSignoff('Approved')">
+            ✓✓ Approver Sign-off
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- EBR Steps execution table -->
+    <div style="margin-top:16px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;">Step Execution Checklist</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Step</th>
+              <th>Operation</th>
+              <th>Critical</th>
+              <th>2nd Check</th>
+              <th>Actual Value</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="ebr-steps-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ TRACEABILITY TAB ═══════════ -->
+<div id="tab-trace" class="main" style="display:none;">
+  <div class="tab-panel">
+    <div class="tab-panel-header">
+      <div>
+        <div class="panel-title">Traceability Matrix</div>
+        <div class="panel-sub">Electronic MBR steps mapped to Paper Master Formula reference sections — verifiable audit trail</div>
+      </div>
+      <button class="btn btn-primary" onclick="showExport('trace')">Export Matrix JSON</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Step #</th>
+            <th>MBR Step (Electronic)</th>
+            <th>Paper Formula Ref</th>
+            <th>Operation Type</th>
+            <th>Critical</th>
+            <th>Key Parameter</th>
+            <th>Deviations</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="trace-body"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="trace-empty" style="margin-top:20px;display:none;">
+      <div class="empty-icon">📋</div>
+      <div style="font-size:13px;font-weight:600;">No steps to trace</div>
+      <div style="font-size:12px;">Add steps in the Recipe Builder tab first</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ EQUIPMENT STATES TAB ═══════════ -->
+<div id="tab-eqm" class="main" style="display:none;">
+  <div class="tab-panel">
+    <div class="tab-panel-header">
+      <div>
+        <div class="panel-title">Equipment State Diagrams (ESP)</div>
+        <div class="panel-sub">Equipment status transitions for shop floor control — auto-generated from recipe steps</div>
+      </div>
+    </div>
+    <div class="eqm-grid" id="eqm-grid"></div>
+  </div>
+</div>
+
+<!-- ═══════════ AUDIT TRAIL TAB ═══════════ -->
+<div id="tab-audit" class="main" style="display:none;">
+  <div class="tab-panel">
+    <div class="tab-panel-header">
+      <div>
+        <div class="panel-title">Audit Trail</div>
+        <div class="panel-sub">Complete immutable log of all actions — 21 CFR Part 11 electronic records simulation</div>
+      </div>
+      <button class="btn" onclick="clearAuditDisplay()">Clear display</button>
+    </div>
+    <div class="table-wrap">
+      <div id="audit-list"></div>
+    </div>
+    <div class="empty" id="audit-empty" style="margin-top:20px;display:none;">
+      <div class="empty-icon">🔒</div>
+      <div style="font-size:13px;font-weight:600;">No audit entries yet</div>
+      <div style="font-size:12px;">All actions will appear here automatically</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ DASHBOARD TAB ═══════════ -->
+<div id="tab-dashboard" class="main" style="display:none;">
+  <div class="tab-panel">
+    <div class="tab-panel-header">
+      <div>
+        <div class="panel-title">Process Analytics Dashboard</div>
+        <div class="panel-sub">Real-time KPIs and Pareto analysis of your batch record</div>
+      </div>
+      <button class="btn" onclick="renderDashboard()">↻ Refresh</button>
+    </div>
+    <div class="kpi-grid" id="kpi-grid"></div>
+    <div class="pareto-wrap">
+      <div class="pareto-title">Pareto Chart — Step Type Distribution</div>
+      <div id="pareto-chart"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <div class="pareto-wrap" style="margin:0">
+        <div class="pareto-title">Deviation Severity Breakdown</div>
+        <div id="deviation-chart"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ EXPORT MODAL ═══════════ -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">Export</div>
+      <button class="btn-ghost" onclick="closeModal()">✕ Close</button>
+    </div>
+    <div class="modal-body">
+      <pre class="code-block" id="modal-code"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="copyCode()">Copy to clipboard</button>
+      <button class="btn" onclick="downloadJSON()">⬇ Download JSON</button>
+      <button class="btn btn-primary" onclick="downloadPDF()">📄 Download PDF</button>
+      <button class="btn" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════
+   DATA CONFIGURATION
+   ─────────────────────────────────────────────
+   STEPS_CFG  — visual style for each operation type
+                (color, background, label shown in UI)
+                TO ADD A NEW STEP TYPE:
+                  1. Add entry here with color + label
+                  2. Add entry to STEP_FIELDS below
+                  3. Add button in sidebar HTML
+                  4. Optionally add to EQM_STATES
+
+   STEP_FIELDS — input fields shown inside each step card
+                 Format: ['Label shown to user', 'key_name']
+                 key_name is how it's stored in step.params
+
+   EQM_STATES  — equipment state machine transitions
+                 shown on the Equipment States tab
+═══════════════════════════════════════════ */
+const STEPS_CFG = {
+  dispense:  { label:'Dispense',     color:'#2563eb', bg:'#eff6ff', textColor:'#1d4ed8' },
+  mix:       { label:'Mix / Blend',  color:'#7c3aed', bg:'#f5f3ff', textColor:'#6d28d9' },
+  granulate: { label:'Granulate',    color:'#0891b2', bg:'#ecfeff', textColor:'#0e7490' },
+  dry:       { label:'Dry',          color:'#d97706', bg:'#fffbeb', textColor:'#b45309' },
+  mill:      { label:'Mill',         color:'#059669', bg:'#ecfdf5', textColor:'#047857' },
+  lubricate: { label:'Lubricate',    color:'#65a30d', bg:'#f7fee7', textColor:'#4d7c0f' },
+  compress:  { label:'Compress',     color:'#dc2626', bg:'#fef2f2', textColor:'#b91c1c' },
+  coat:      { label:'Coat',         color:'#db2777', bg:'#fdf2f8', textColor:'#be185d' },
+  inspect:   { label:'IPC Inspect',  color:'#6d28d9', bg:'#f5f3ff', textColor:'#5b21b6' },
+  pack:      { label:'Pack / Label', color:'#0f766e', bg:'#f0fdfa', textColor:'#0d9488' },
+  hold:      { label:'Hold / Wait',  color:'#92400e', bg:'#fffbeb', textColor:'#78350f' },
+  sample:    { label:'Sample / QC',  color:'#374151', bg:'#f9fafb', textColor:'#1f2937' },
+};
+
+const STEP_FIELDS = {
+  dispense:  [['Material ID / SAP No.','mat_id'],['Target quantity (kg)','qty'],['Tolerance (± %)','tol'],['Equipment / booth','equip']],
+  mix:       [['Impeller speed (rpm)','speed'],['Duration (min)','dur'],['Temperature (°C)','temp'],['Equipment','equip']],
+  granulate: [['Impeller speed (rpm)','imp'],['Chopper speed (rpm)','chop'],['Endpoint – Power (kW)','endpt'],['Equipment','equip']],
+  dry:       [['Inlet air temp (°C)','inlet'],['Outlet air temp (°C)','outlet'],['LOD target (%)','lod'],['Equipment','equip']],
+  mill:      [['Screen aperture (mm)','screen'],['Feed rate (kg/h)','feed'],['Rotor speed (rpm)','speed'],['Equipment','equip']],
+  lubricate: [['Duration (min)','dur'],['Blender speed (rpm)','speed'],['Blend quantity (kg)','qty'],['Equipment','equip']],
+  compress:  [['Target hardness (N)','hard'],['Tablet thickness (mm)','thick'],['Average weight (mg)','wt'],['Equipment','equip']],
+  coat:      [['Inlet air temp (°C)','inlet'],['Pan speed (rpm)','pan'],['Weight gain target (%)','wg'],['Equipment','equip']],
+  inspect:   [['Parameter / test','param'],['Lower spec limit','lsl'],['Upper spec limit','usl'],['Sample size (n)','n']],
+  pack:      [['Pack configuration','size'],['Line speed (units/min)','speed'],['Batch / Lot number','lot'],['Equipment','equip']],
+  hold:      [['Max hold duration','dur'],['Storage temp (°C)','temp'],['Relative humidity (%)','hum'],['Hold reason','reason']],
+  sample:    [['Sampling point','point'],['Sample quantity','qty'],['Test method reference','method'],['Acceptance criteria','criteria']],
+};
+
+const EQM_STATES = {
+  granulate: { states:[{n:'Idle',c:'#94a3b8'},{n:'CIP',c:'#0891b2'},{n:'Ready',c:'#22c55e'},{n:'Running',c:'#3b82f6'},{n:'Cleaning',c:'#f59e0b'}] },
+  dry:       { states:[{n:'Idle',c:'#94a3b8'},{n:'Heat-up',c:'#f97316'},{n:'Running',c:'#3b82f6'},{n:'Cool-down',c:'#6366f1'},{n:'Clean',c:'#22c55e'}] },
+  compress:  { states:[{n:'Idle',c:'#94a3b8'},{n:'Setup',c:'#a78bfa'},{n:'Running',c:'#3b82f6'},{n:'Changeover',c:'#f59e0b'},{n:'Maintenance',c:'#ef4444'}] },
+  coat:      { states:[{n:'Idle',c:'#94a3b8'},{n:'Pre-heat',c:'#f97316'},{n:'Running',c:'#3b82f6'},{n:'Unloading',c:'#d97706'},{n:'CIP',c:'#0891b2'}] },
+  dispense:  { states:[{n:'Idle',c:'#94a3b8'},{n:'Ready',c:'#22c55e'},{n:'Dispensing',c:'#3b82f6'},{n:'Verified',c:'#10b981'}] },
+  mix:       { states:[{n:'Idle',c:'#94a3b8'},{n:'Ready',c:'#22c55e'},{n:'Mixing',c:'#7c3aed'},{n:'Complete',c:'#10b981'}] },
+  mill:      { states:[{n:'Idle',c:'#94a3b8'},{n:'Setup',c:'#a78bfa'},{n:'Milling',c:'#059669'},{n:'Clean',c:'#22c55e'}] },
+  lubricate: { states:[{n:'Idle',c:'#94a3b8'},{n:'Charging',c:'#65a30d'},{n:'Running',c:'#3b82f6'},{n:'Discharge',c:'#10b981'}] },
+  inspect:   { states:[{n:'Idle',c:'#94a3b8'},{n:'Sampling',c:'#a78bfa'},{n:'Testing',c:'#3b82f6'},{n:'Pass',c:'#22c55e'},{n:'Fail',c:'#ef4444'}] },
+  pack:      { states:[{n:'Idle',c:'#94a3b8'},{n:'Setup',c:'#a78bfa'},{n:'Running',c:'#0f766e'},{n:'Starved',c:'#f59e0b'},{n:'Complete',c:'#10b981'}] },
+  hold:      { states:[{n:'Pending',c:'#94a3b8'},{n:'In hold',c:'#d97706'},{n:'Released',c:'#22c55e'}] },
+  sample:    { states:[{n:'Pending',c:'#94a3b8'},{n:'Sampled',c:'#a78bfa'},{n:'In testing',c:'#3b82f6'},{n:'Complete',c:'#10b981'}] },
+};
+
+/* ═══════════════════════════════════════════
+   APPLICATION STATE
+   ─────────────────────────────────────────────
+   All data lives in these variables in memory.
+   Nothing is saved to a server — export JSON to
+   save your work, import JSON to reload it.
+
+   steps[]        — array of all process steps in the MBR
+   auditLog[]     — immutable log of every user action
+   signoffs[]     — electronic sign-off records for EBR
+   mbrStatus      — current MBR lifecycle status
+   ebrCreated     — whether a batch run has been initiated
+═══════════════════════════════════════════ */
+let steps = [];
+let aiCache = null;
+let mbrStatus = 'draft';
+let auditLog = [];
+let signoffs = [];
+let ebrCreated = false;
+
+/* ═══════════════════════════════════════════
+   AUDIT TRAIL
+   ─────────────────────────────────────────────
+   logAudit() is called automatically on every
+   create / update / delete action throughout the app.
+
+   Parameters:
+     action      — 'INSERT' | 'UPDATE' | 'DELETE' | 'SIGNOFF'
+     table       — which data entity was affected
+     description — human-readable description of the change
+     user        — who made the change (defaults to MBR author)
+
+   TO LOG A CUSTOM ACTION anywhere in the code:
+     logAudit('UPDATE', 'step', 'Your description here', 'Username');
+═══════════════════════════════════════════ */
+function logAudit(action, table, description, user) {
+  const entry = {
+    time: new Date(),
+    action,
+    table,
+    description,
+    user: user || document.getElementById('mbr-author')?.value || 'system'
+  };
+  auditLog.unshift(entry);
+  renderAudit();
+}
+
+function renderAudit() {
+  const list = document.getElementById('audit-list');
+  const empty = document.getElementById('audit-empty');
+  if (!list) return;
+  if (auditLog.length === 0) {
+    list.innerHTML = '';
+    if (empty) empty.style.display = 'flex';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  list.innerHTML = auditLog.map(e => `
+    <div class="audit-entry">
+      <div class="audit-time">${e.time.toLocaleTimeString()}</div>
+      <div class="audit-action audit-${e.action}">${e.action}</div>
+      <div>
+        <div class="audit-desc">${escHtml(e.description)} <span style="color:var(--text-muted);font-size:10px;">[${e.table}]</span></div>
+        <div class="audit-user">👤 ${escHtml(e.user)} · ${e.time.toLocaleDateString()}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function clearAuditDisplay() {
+  // Note: in a real system audit trail is immutable — we just clear the view
+  showToast('Audit trail cleared from view (entries remain in system log)');
+}
+
+/* ═══════════════════════════════════════════
+   MBR STATUS WORKFLOW
+   ─────────────────────────────────────────────
+   MBR lifecycle: draft → under_review → approved → obsolete
+   Only an APPROVED MBR can be executed as an EBR.
+
+   TO ADD A NEW STATUS (e.g. 'on_hold'):
+     1. Add button in the mbr-status-bar HTML section
+     2. Add the label in the labels{} object below
+     3. Add CSS class .status-onhold in the <style> section
+═══════════════════════════════════════════ */
+function setMBRStatus(status) {
+  const old = mbrStatus;
+  mbrStatus = status;
+  const labels = { draft:'Draft', under_review:'Under Review', approved:'Approved', obsolete:'Obsolete' };
+  document.getElementById('current-status-label').innerHTML = `Current: <strong>${labels[status]}</strong>`;
+  logAudit('UPDATE','batch_record',`MBR status changed from ${labels[old]||old} to ${labels[status]}`,
+    document.getElementById('mbr-author').value);
+  showToast(`Status updated to: ${labels[status]}`);
+}
+
+/* ═══════════════════════════════════════════
+   RENDER STEPS
+   ─────────────────────────────────────────────
+   renderSteps() rebuilds the entire steps list in the DOM.
+   It is called after every state change (add, remove, move).
+
+   Each step card contains:
+     - Step header  : number, operation badge, title input, flags
+     - Step body    : operation-specific parameter fields
+     - PVL section  : parameter value list (min/target/max)
+     - Deviation section: shown only if deviations exist
+     - Step footer  : move up/down, log deviation, remove
+
+   TO ADD A NEW FIELD to all step cards:
+     Add it inside the step-body section in the card.innerHTML
+     and store the value in step.params or step (top-level)
+═══════════════════════════════════════════ */
+function renderSteps() {
+  const list = document.getElementById('steps-list');
+  const empty = document.getElementById('empty-state');
+  list.innerHTML = '';
+
+  if (steps.length === 0) {
+    empty.style.display = 'flex';
+    renderTrace(); renderEQM(); renderEBRSteps();
+    return;
+  }
+  empty.style.display = 'none';
+
+  steps.forEach((step, i) => {
+    const cfg = STEPS_CFG[step.type];
+    const fields = STEP_FIELDS[step.type];
+    const devCount = (step.deviations || []).length;
+
+    if (i > 0) {
+      const conn = document.createElement('div');
+      conn.className = 'connector';
+      conn.innerHTML = '<div class="connector-line"></div>';
+      list.appendChild(conn);
+    }
+
+    const card = document.createElement('div');
+    card.className = 'step-card' + (devCount > 0 ? ' has-deviation' : '');
+    card.innerHTML = `
+      <div class="step-header">
+        <div class="step-num" style="background:${cfg.color}">${i + 1}</div>
+        <span class="step-badge" style="background:${cfg.bg};color:${cfg.textColor}">${cfg.label}</span>
+        <input class="step-title-input"
+          placeholder="Enter step description…"
+          value="${escHtml(step.title)}"
+          onchange="steps[${i}].title=this.value;syncTrace();logAudit('UPDATE','step','Step ${i+1} title updated',null)">
+        <div class="step-flags">
+          <button class="flag-btn ${step.critical ? 'critical-on' : 'critical-off'}"
+            onclick="toggleFlag(${i},'critical')" title="Toggle critical step">
+            ${step.critical ? '⚠ Critical' : '○ Critical'}
+          </button>
+          <button class="flag-btn ${step.doubleCheck ? 'dbl-on' : 'dbl-off'}"
+            onclick="toggleFlag(${i},'doubleCheck')" title="Toggle 2nd person check">
+            ${step.doubleCheck ? '✓✓ 2nd Check' : '○ 2nd Check'}
+          </button>
+        </div>
+      </div>
+      <div class="step-body">
+        ${fields.map(([lbl, key]) => `
+          <div class="field">
+            <div class="field-lbl">${lbl}</div>
+            <input class="field-inp"
+              value="${escHtml(step.params[key] || '')}"
+              placeholder="—"
+              onchange="steps[${i}].params['${key}']=this.value;syncTrace()">
+          </div>
+        `).join('')}
+        <div class="field full">
+          <div class="field-lbl">GMP Remarks / Notes</div>
+          <input class="field-inp"
+            value="${escHtml(step.notes || '')}"
+            placeholder="Add GMP notes, critical parameters, operator instructions…"
+            onchange="steps[${i}].notes=this.value">
+        </div>
+      </div>
+
+      <!-- PVL Section -->
+      <div class="pvl-section">
+        <div class="pvl-header">
+          <span class="pvl-title">📊 Parameter Value List (PVL)</span>
+          <button class="btn btn-sm" onclick="addPVL(${i})">+ Add Parameter</button>
+        </div>
+        ${renderPVLRows(i)}
+      </div>
+
+      <!-- Deviation Section -->
+      <div class="deviation-section" id="dev-section-${i}" style="${devCount === 0 ? 'display:none' : ''}">
+        <div class="deviation-header">
+          <span class="deviation-title">⚠ Deviations / CAPA (${devCount})</span>
+        </div>
+        ${renderDeviationRows(i)}
+      </div>
+
+      <div class="step-footer">
+        ${i > 0 ? `<button class="btn-ghost" onclick="moveStep(${i},-1)">↑ Up</button>` : ''}
+        ${i < steps.length-1 ? `<button class="btn-ghost" onclick="moveStep(${i},1)">↓ Down</button>` : ''}
+        <button class="btn-ghost warn" onclick="logDeviation(${i})">⚠ Log Deviation</button>
+        <button class="btn-ghost danger" onclick="removeStep(${i})">✕ Remove</button>
+        ${devCount > 0 ? `<span class="dev-count visible">${devCount} deviation${devCount>1?'s':''}</span>` : ''}
+      </div>
+    `;
+    list.appendChild(card);
+  });
+
+  syncTrace();
+  syncEQM();
+  renderEBRSteps();
+}
+
+function renderPVLRows(i) {
+  const pvl = steps[i].pvl || [];
+  if (pvl.length === 0) {
+    return `<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">No PVL entries. Click "+ Add Parameter" to define min/target/max ranges.</div>`;
+  }
+  return `
+    <table class="pvl-table">
+      <thead><tr><th>Parameter</th><th>Min</th><th>Target</th><th>Max</th><th>Unit</th><th></th></tr></thead>
+      <tbody>
+        ${pvl.map((p, j) => `
+          <tr>
+            <td><input class="pvl-inp" value="${escHtml(p.name)}" placeholder="e.g. Speed"
+              onchange="steps[${i}].pvl[${j}].name=this.value"></td>
+            <td><input class="pvl-inp" value="${escHtml(p.min)}" placeholder="—"
+              onchange="steps[${i}].pvl[${j}].min=this.value" style="width:60px"></td>
+            <td><input class="pvl-inp" value="${escHtml(p.target)}" placeholder="—"
+              onchange="steps[${i}].pvl[${j}].target=this.value" style="width:60px"></td>
+            <td><input class="pvl-inp" value="${escHtml(p.max)}" placeholder="—"
+              onchange="steps[${i}].pvl[${j}].max=this.value" style="width:60px"></td>
+            <td><input class="pvl-inp" value="${escHtml(p.unit)}" placeholder="rpm"
+              onchange="steps[${i}].pvl[${j}].unit=this.value" style="width:50px"></td>
+            <td><button class="btn-ghost danger" onclick="removePVL(${i},${j})" style="padding:2px 6px;font-size:10px">✕</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderDeviationRows(i) {
+  const devs = steps[i].deviations || [];
+  return devs.map((d, j) => `
+    <div style="background:var(--bg-primary);border:1px solid #fca5a5;border-radius:6px;padding:10px;margin-bottom:6px;font-size:11px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <strong>DEV-${String(j+1).padStart(3,'0')}</strong>
+        <span class="badge badge-${d.severity==='critical'?'critical':d.severity==='major'?'review':'pending'}">${d.severity}</span>
+        <span class="badge ${d.status==='closed'?'badge-verified':d.status==='open'?'badge-critical':'badge-review'}">${d.status}</span>
+      </div>
+      <div style="margin-bottom:3px"><strong>Type:</strong> ${escHtml(d.type)}</div>
+      <div style="margin-bottom:3px"><strong>Description:</strong> ${escHtml(d.desc)}</div>
+      <div style="margin-bottom:3px"><strong>Root Cause:</strong> ${escHtml(d.rootCause||'—')}</div>
+      <div><strong>CAPA Ref:</strong> <span style="font-family:var(--font-mono)">${escHtml(d.capa||'—')}</span></div>
+    </div>
+  `).join('');
+}
+
+function toggleFlag(i, flag) {
+  steps[i][flag] = !steps[i][flag];
+  const label = flag === 'critical' ? 'Critical flag' : '2nd person check';
+  logAudit('UPDATE','step',`Step ${i+1}: ${label} set to ${steps[i][flag]}`,null);
+  renderSteps();
+}
+
+function addPVL(i) {
+  if (!steps[i].pvl) steps[i].pvl = [];
+  steps[i].pvl.push({ name:'', min:'', target:'', max:'', unit:'' });
+  renderSteps();
+}
+
+function removePVL(i, j) {
+  steps[i].pvl.splice(j, 1);
+  renderSteps();
+}
+
+function logDeviation(i) {
+  const type = prompt('Deviation type:\n(e.g. Out of Specification, Equipment Failure, Process Deviation, Material Issue)');
+  if (!type) return;
+  const desc = prompt('Describe the deviation:');
+  if (!desc) return;
+  const rootCause = prompt('Root cause (or leave blank):') || '';
+  const capa = prompt('CAPA reference (e.g. CAPA-2026-001, or leave blank):') || '';
+  const severity = prompt('Severity: minor / major / critical') || 'minor';
+
+  if (!steps[i].deviations) steps[i].deviations = [];
+  steps[i].deviations.push({ type, desc, rootCause, capa, severity, status: 'open', raisedAt: new Date().toISOString() });
+
+  const user = document.getElementById('mbr-author').value;
+  logAudit('INSERT','deviation',`Deviation logged on Step ${i+1}: ${type} — ${desc}`, user);
+  showToast('Deviation logged ✓');
+  renderSteps();
+  syncTrace();
+}
+
+function escHtml(str) {
+  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function addStep(type) {
+  const critical = ['granulate','compress','dispense'].includes(type);
+  const doubleCheck = ['dispense','inspect','sample'].includes(type);
+  steps.push({ type, title: STEPS_CFG[type].label + ' step', params: {}, notes: '', critical, doubleCheck, pvl: [], deviations: [] });
+  logAudit('INSERT','step',`Step added: ${STEPS_CFG[type].label}`,null);
+  renderSteps();
+  setTimeout(() => {
+    const c = document.querySelector('.canvas-area');
+    if (c) c.scrollTop = c.scrollHeight;
+  }, 50);
+}
+
+function removeStep(i) {
+  const label = steps[i].title;
+  steps.splice(i, 1);
+  logAudit('DELETE','step',`Step removed: ${label}`,null);
+  renderSteps();
+}
+
+function moveStep(i, dir) {
+  const j = i + dir;
+  if (j < 0 || j >= steps.length) return;
+  [steps[i], steps[j]] = [steps[j], steps[i]];
+  logAudit('UPDATE','step',`Steps ${i+1} and ${j+1} reordered`,null);
+  renderSteps();
+}
+
+function clearAll() {
+  if (steps.length === 0 || confirm('Clear all steps?')) {
+    steps = [];
+    logAudit('DELETE','batch_record','All steps cleared',null);
+    renderSteps();
+  }
+}
+
+/* ═══════════════════════════════════════════
+   TRACEABILITY MATRIX
+   ─────────────────────────────────────────────
+   Maps each MBR step to a Paper Master Formula reference.
+   This is a core GMP requirement — every electronic step
+   must be traceable back to its source paper document.
+
+   Paper formula ref format: PMF-§001, PMF-§002 etc.
+   TO CHANGE the reference format: edit the ref variable
+   in syncTrace() — e.g. `SOP-MAN-§${...}` for SOPs.
+
+   Status is auto-assigned by operation type:
+     dispense → 'verified'
+     inspect/sample → 'requires review'
+     everything else → 'pending'
+
+   TO CHANGE status logic: edit the statusMap object below.
+═══════════════════════════════════════════ */
+function syncTrace() {
+  const tbody = document.getElementById('trace-body');
+  const empty = document.getElementById('trace-empty');
+  if (!tbody) return;
+
+  if (steps.length === 0) {
+    tbody.innerHTML = '';
+    if (empty) empty.style.display = 'flex';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+
+  const statusMap = { dispense:'verified', inspect:'requires review', sample:'requires review' };
+
+  tbody.innerHTML = steps.map((step, i) => {
+    const cfg = STEPS_CFG[step.type];
+    const status = statusMap[step.type] || 'pending';
+    const badgeCls = status === 'verified' ? 'badge-verified' : status === 'requires review' ? 'badge-review' : 'badge-pending';
+    const ref = `PMF-§${String(i + 1).padStart(3, '0')}`;
+    const keyParam = Object.values(step.params).find(v => v) || '—';
+    const devCount = (step.deviations||[]).length;
+
+    return `<tr>
+      <td style="text-align:center;font-weight:600;">${i + 1}</td>
+      <td>${escHtml(step.title)}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)">${ref}</td>
+      <td><span class="badge" style="background:${cfg.bg};color:${cfg.textColor}">${cfg.label}</span></td>
+      <td>${step.critical ? '<span class="badge badge-critical">⚠ Critical</span>' : '—'}</td>
+      <td style="color:var(--text-secondary);font-size:12px;">${escHtml(keyParam)}</td>
+      <td>${devCount > 0 ? `<span class="badge badge-critical">${devCount} open</span>` : '<span style="color:var(--text-muted)">None</span>'}</td>
+      <td><span class="badge ${badgeCls}">${status}</span></td>
+    </tr>`;
+  }).join('');
+}
+function renderTrace() { syncTrace(); }
+
+/* ═══════════════════════════════════════════
+   EQUIPMENT STATE DIAGRAMS (ESP)
+   ─────────────────────────────────────────────
+   Shows the lifecycle states each piece of equipment
+   goes through during manufacturing (Idle → Running → Clean).
+   This mirrors the Equipment State Machine concept in
+   real MES systems like Werum PAS-X.
+
+   Equipment is auto-detected from step.params['equip'].
+   If no equipment is entered in steps, default equipment
+   (granulator, dryer, press, coater) is shown instead.
+
+   TO ADD A NEW EQUIPMENT TYPE:
+     Add an entry to EQM_STATES at the top of the file
+     with an array of { n: 'State Name', c: '#hexcolor' }
+═══════════════════════════════════════════ */
+function syncEQM() {
+  const grid = document.getElementById('eqm-grid');
+  if (!grid) return;
+  const seen = new Set();
+  const equipList = [];
+  steps.forEach(step => {
+    const displayName = step.params['equip'] || (STEPS_CFG[step.type].label + ' Unit');
+    const key = step.type + '|' + displayName;
+    if (!seen.has(key)) {
+      seen.add(key);
+      equipList.push({ type: step.type, name: displayName });
+    }
+  });
+  if (equipList.length === 0) {
+    equipList.push(
+      { type:'granulate', name:'High Shear Granulator' },
+      { type:'dry',       name:'Fluid Bed Dryer' },
+      { type:'compress',  name:'Tablet Press' },
+      { type:'coat',      name:'Coating Pan' }
+    );
+  }
+  grid.innerHTML = equipList.map(eq => {
+    const states = (EQM_STATES[eq.type] || EQM_STATES.mix).states;
+    return `
+      <div class="eqm-card">
+        <div class="eqm-name">${escHtml(eq.name)}</div>
+        ${states.map((s, i) => `
+          <div class="state-row">
+            <div class="state-dot" style="background:${s.c}"></div>
+            <span style="font-size:12px">${s.n}</span>
+          </div>
+          ${i < states.length - 1 ? '<span class="state-arrow">↓</span>' : ''}
+        `).join('')}
+      </div>
+    `;
+  }).join('');
+}
+function renderEQM() { syncEQM(); }
+
+/* ═══════════════════════════════════════════
+   EBR (EXECUTED BATCH RECORD) EXECUTION
+   ─────────────────────────────────────────────
+   An EBR is created by "executing" an MBR for a
+   specific production lot. It records:
+     - Lot number (unique per batch)
+     - Actual batch size vs. target
+     - Operator who ran the batch
+     - Step-by-step actual values recorded during run
+     - Electronic sign-offs (Reviewer + Approver)
+
+   createEBR()     — initialises the batch run
+   addSignoff()    — records an electronic signature
+   renderEBRSteps()— builds the step execution checklist
+
+   TO ADD A NEW FIELD to EBR:
+     1. Add input in the EBR Execution Details card (HTML)
+     2. Read it in createEBR() and add to the export in showExport('ebr')
+═══════════════════════════════════════════ */
+function createEBR() {
+  const lot = document.getElementById('ebr-lot').value;
+  const operator = document.getElementById('ebr-operator').value;
+  if (!lot || !operator) { showToast('Please fill in Lot Number and Operator'); return; }
+  ebrCreated = true;
+  logAudit('INSERT','ebr',`EBR created — Lot: ${lot}, Operator: ${operator}`, operator);
+  renderEBRSteps();
+  showToast(`EBR created: ${lot} ✓`);
+}
+
+function renderEBRSteps() {
+  const tbody = document.getElementById('ebr-steps-body');
+  if (!tbody) return;
+  if (!ebrCreated || steps.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">Execute a batch first to see step checklist</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = steps.map((step, i) => {
+    const cfg = STEPS_CFG[step.type];
+    return `<tr>
+      <td style="font-weight:600;text-align:center">${i+1}</td>
+      <td>${escHtml(step.title)}</td>
+      <td><span class="badge" style="background:${cfg.bg};color:${cfg.textColor}">${cfg.label}</span></td>
+      <td>${step.critical ? '<span class="badge badge-critical">⚠ Yes</span>' : '—'}</td>
+      <td>${step.doubleCheck ? '<span class="badge badge-review">Required</span>' : '—'}</td>
+      <td><input style="border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:11px;width:120px;background:var(--bg-secondary);color:var(--text-primary)" placeholder="Actual value…"></td>
+      <td>
+        <select style="font-size:11px;border:1px solid var(--border);border-radius:4px;padding:4px;background:var(--bg-secondary);color:var(--text-primary)"
+          onchange="logAudit('UPDATE','ebr_step','Step ${i+1} status: '+this.value,document.getElementById('ebr-operator').value)">
+          <option value="pending">Pending</option>
+          <option value="complete">Complete</option>
+          <option value="skip">Skipped</option>
+          <option value="fail">Failed</option>
+        </select>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function addSignoff(role) {
+  const inputId = role === 'Reviewed' ? 'signoff-reviewer' : 'signoff-approver';
+  const name = document.getElementById(inputId).value.trim();
+  if (!name) { showToast('Please enter a name'); return; }
+  const entry = { role, name, time: new Date() };
+  signoffs.push(entry);
+  logAudit('SIGNOFF','ebr',`${role} by ${name} (21 CFR Part 11 e-signature)`, name);
+  renderSignoffs();
+  document.getElementById(inputId).value = '';
+  showToast(`${role} sign-off recorded for ${name} ✓`);
+}
+
+function renderSignoffs() {
+  const list = document.getElementById('signoff-list');
+  if (!list) return;
+  if (signoffs.length === 0) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">No sign-offs recorded yet.</div>';
+    return;
+  }
+  list.innerHTML = signoffs.map(s => `
+    <div class="signoff-row">
+      <div class="signoff-icon">${s.role === 'Approved' ? '✅' : '👁'}</div>
+      <div class="signoff-info">
+        <div class="signoff-role">${s.role}</div>
+        <div class="signoff-name">${escHtml(s.name)}</div>
+      </div>
+      <div class="signoff-time">${s.time.toLocaleTimeString()}<br>${s.time.toLocaleDateString()}</div>
+    </div>
+  `).join('');
+}
+
+
+
+/* ═══════════════════════════════════════════
+   ANALYTICS DASHBOARD
+   ─────────────────────────────────────────────
+   renderDashboard() computes KPIs from live step data
+   and draws Pareto charts using pure HTML/CSS bars
+   (no external chart library needed).
+
+   KPI CARDS: Total Steps, Critical Steps, Open Deviations
+   CHARTS:
+     Pareto chart    — step type frequency (most common first)
+     Deviation chart — breakdown by severity (minor/major/critical)
+
+   TO ADD A NEW KPI CARD:
+     Copy a kpi-card div block and update the label + value.
+
+   TO ADD A NEW CHART:
+     1. Add a <div id="my-chart"> in the Dashboard tab HTML
+     2. Build the pareto-bar-row HTML in renderDashboard()
+     3. Call document.getElementById('my-chart').innerHTML = ...
+═══════════════════════════════════════════ */
+function renderDashboard() {
+  const total = steps.length;
+  const critical = steps.filter(s => s.critical).length;
+  const allDevs = steps.flatMap(s => s.deviations || []);
+  const openDevs = allDevs.filter(d => d.status === 'open').length;
+  const verified = steps.filter(s => s.type === 'dispense').length;
+  const pctVerified = total > 0 ? Math.round((verified / total) * 100) : 0;
+
+  document.getElementById('kpi-grid').innerHTML = `
+    <div class="kpi-card">
+      <div class="kpi-label">Total Steps</div>
+      <div class="kpi-value">${total}</div>
+      <div class="kpi-sub">in MBR</div>
+    </div>
+    <div class="kpi-card ${critical > 0 ? 'kpi-warn' : ''}">
+      <div class="kpi-label">Critical Steps</div>
+      <div class="kpi-value">${critical}</div>
+      <div class="kpi-sub">require enhanced monitoring</div>
+    </div>
+    <div class="kpi-card ${openDevs > 0 ? 'kpi-danger' : 'kpi-success'}">
+      <div class="kpi-label">Open Deviations</div>
+      <div class="kpi-value">${openDevs}</div>
+      <div class="kpi-sub">${allDevs.length} total logged</div>
+    </div>
+
+  `;
+
+  // Pareto — step type distribution
+  const typeCounts = {};
+  steps.forEach(s => { typeCounts[STEPS_CFG[s.type].label] = (typeCounts[STEPS_CFG[s.type].label]||0) + 1; });
+  const sorted = Object.entries(typeCounts).sort((a,b) => b[1]-a[1]);
+  const maxCount = sorted[0]?.[1] || 1;
+  const paretoColors = ['#0A3D6B','#1a5fa8','#2a7fd4','#4a90d9','#6aace0','#94c4ea'];
+
+  document.getElementById('pareto-chart').innerHTML = sorted.length === 0
+    ? '<div style="color:var(--text-muted);font-size:12px;padding:8px">Add steps to see Pareto chart</div>'
+    : sorted.map(([label, count], i) => `
+      <div class="pareto-bar-row">
+        <div class="pareto-label">${label}</div>
+        <div class="pareto-bar-bg">
+          <div class="pareto-bar-fill" style="width:${(count/maxCount)*100}%;background:${paretoColors[i%paretoColors.length]}"></div>
+        </div>
+        <div class="pareto-count">${count}</div>
+      </div>
+    `).join('');
+
+  // Deviation severity chart
+  const sevCounts = { minor:0, major:0, critical:0 };
+  allDevs.forEach(d => { sevCounts[d.severity] = (sevCounts[d.severity]||0) + 1; });
+  const maxSev = Math.max(...Object.values(sevCounts), 1);
+  document.getElementById('deviation-chart').innerHTML = Object.entries(sevCounts).map(([sev, count]) => `
+    <div class="pareto-bar-row">
+      <div class="pareto-label">${sev.charAt(0).toUpperCase()+sev.slice(1)}</div>
+      <div class="pareto-bar-bg">
+        <div class="pareto-bar-fill" style="width:${(count/maxSev)*100}%;background:${sev==='critical'?'#dc2626':sev==='major'?'#d97706':'#6b7280'}"></div>
+      </div>
+      <div class="pareto-count">${count}</div>
+    </div>
+  `).join('') || '<div style="color:var(--text-muted);font-size:12px;padding:8px">No deviations logged</div>';
+
+}
+
+/* ═══════════════════════════════════════════
+   TAB SWITCHING
+   ─────────────────────────────────────────────
+   switchTab(tab) shows one tab panel and hides all others.
+   It also triggers a render function for the active tab
+   so data is always fresh when you switch.
+
+   tabs[] array order must match the order of
+   <button class="tab"> elements in the header nav.
+
+   TO ADD A NEW TAB:
+     1. Add its ID to the tabs[] array below
+     2. Add an if(tab==='xxx') renderXxx() call below
+     3. Add the HTML panel: <div id="tab-xxx" ...>
+     4. Add the nav button: <button class="tab" onclick="switchTab('xxx')">
+═══════════════════════════════════════════ */
+function switchTab(tab) {
+  const tabs = ['recipe','ebr','trace','eqm','audit','dashboard'];
+  tabs.forEach(t => {
+    document.getElementById('tab-' + t).style.display = t === tab ? 'flex' : 'none';
+  });
+  document.querySelectorAll('.tab').forEach((el, i) => {
+    el.classList.toggle('active', tabs[i] === tab);
+  });
+  if (tab === 'trace') syncTrace();
+  if (tab === 'eqm') syncEQM();
+  if (tab === 'audit') renderAudit();
+  if (tab === 'dashboard') renderDashboard();
+  if (tab === 'ebr') renderEBRSteps();
+
+}
+
+/* ═══════════════════════════════════════════
+   EXPORT / DOWNLOAD
+   ─────────────────────────────────────────────
+   showExport(type) — opens the modal with formatted JSON
+     type = 'mbr'   → Master Batch Record export
+     type = 'ebr'   → Executed Batch Record export
+     type = 'trace' → Traceability Matrix export
+
+   downloadJSON()   — saves the displayed JSON as a .json file
+   downloadPDF()    — opens a formatted print-ready HTML report
+                      in a new tab; user clicks Print → Save as PDF
+
+   copyCode()       — copies JSON to clipboard
+
+   TO CHANGE what's included in the MBR export:
+     Edit the object inside showExport() where type === 'mbr'
+═══════════════════════════════════════════ */
+function showExport(type) {
+  const modal = document.getElementById('modal');
+  const title = document.getElementById('modal-title');
+  const code  = document.getElementById('modal-code');
+  modal.classList.add('open');
+  const mbrTitle = document.getElementById('mbr-title').value;
+  const now = new Date().toISOString();
+
+  if (type === 'trace') {
+    title.textContent = 'Traceability Matrix — JSON Export';
+    const matrix = steps.map((step, i) => ({
+      step_number: i + 1,
+      mbr_step_description: step.title,
+      paper_formula_reference: `PMF-§${String(i+1).padStart(3,'0')}`,
+      operation_type: STEPS_CFG[step.type].label,
+      critical_step: step.critical,
+      requires_double_check: step.doubleCheck,
+      parameters: step.params,
+      pvl: step.pvl,
+      deviations: step.deviations,
+      gmp_notes: step.notes,
+      status: ['dispense'].includes(step.type) ? 'verified' : ['inspect','sample'].includes(step.type) ? 'requires_review' : 'pending'
+    }));
+    code.textContent = JSON.stringify({ document_type:'Traceability Matrix', mbr_title:mbrTitle, generated_at:now, total_steps:steps.length, traceability_matrix:matrix }, null, 2);
+
+  } else if (type === 'ebr') {
+    title.textContent = 'Executed Batch Record — JSON Export';
+    code.textContent = JSON.stringify({
+      document_type: 'Executed Batch Record',
+      system: 'TraceKit v2',
+      mbr_title: mbrTitle,
+      lot_number: document.getElementById('ebr-lot').value,
+      batch_size: document.getElementById('ebr-size').value,
+      operator: document.getElementById('ebr-operator').value,
+      manufacturing_date: document.getElementById('ebr-date').value,
+      status: document.getElementById('ebr-status').value,
+      sign_offs: signoffs.map(s => ({ role:s.role, name:s.name, timestamp:s.time.toISOString() })),
+      steps: steps.map((step, i) => ({
+        step_number: i+1,
+        step_id: `STEP-${String(i+1).padStart(3,'0')}`,
+        operation_type: STEPS_CFG[step.type].label,
+        description: step.title,
+        parameters: step.params,
+        pvl: step.pvl,
+        critical_step: step.critical,
+        requires_double_check: step.doubleCheck,
+        deviations: step.deviations,
+        gmp_notes: step.notes
+      })),
+      audit_trail_entries: auditLog.length,
+      generated_at: now
+    }, null, 2);
+
+  } else {
+    title.textContent = 'Master Batch Record — TraceKit v2 JSON Export';
+    code.textContent = JSON.stringify({
+      document_type: 'Master Batch Record',
+      system: 'TraceKit v2',
+      mbr_title: mbrTitle,
+      mbr_version: document.getElementById('mbr-version').value,
+      product_code: document.getElementById('product-code').value,
+      batch_size: document.getElementById('batch-size').value,
+      author: document.getElementById('mbr-author').value,
+      status: mbrStatus,
+      generated_at: now,
+      product: { name:'Metformin HCl', strength:'500mg', dosage_form:'Film-coated tablet' },
+      steps: steps.map((step, i) => ({
+        step_number: i + 1,
+        step_id: `STEP-${String(i+1).padStart(3,'0')}`,
+        operation_type: STEPS_CFG[step.type].label,
+        description: step.title,
+        parameters: step.params,
+        pvl: step.pvl,
+        gmp_notes: step.notes,
+        critical_step: step.critical,
+        requires_double_check: step.doubleCheck,
+        deviations: step.deviations || [],
+        paper_formula_reference: `PMF-§${String(i+1).padStart(3,'0')}`,
+        status: 'draft'
+      }))
+    }, null, 2);
+  }
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+function copyCode() {
+  navigator.clipboard.writeText(document.getElementById('modal-code').textContent).then(() => {
+    showToast('Copied to clipboard ✓');
+  });
+}
+
+/* ═══════════════════════════════════════════
+   TOAST
+═══════════════════════════════════════════ */
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+/* ═══════════════════════════════════════════
+   AI PARAMETER ASSISTANT
+   ─────────────────────────────────────────────
+   runAI() sends the user's description to Claude API
+   and gets back GMP-compliant parameters formatted as:
+     STEP TYPE, TITLE, PARAMETERS, EQUIPMENT, GMP NOTE
+
+   If the API call fails (no key, network error etc.),
+   generateMockAI() provides realistic fallback responses
+   based on keyword matching — so the demo always works.
+
+   addFromAI() parses the AI response and creates a new
+   step automatically from the generated parameters.
+
+   TO ADD A NEW MOCK RESPONSE:
+     Add an if(lower.includes('keyword')) return `...` block
+     in generateMockAI() following the same format.
+
+   TO CONNECT A REAL API KEY:
+     Add header: 'x-api-key': 'YOUR_KEY_HERE'
+     to the fetch() headers object in runAI()
+═══════════════════════════════════════════ */
+async function runAI() {
+  const input = document.getElementById('ai-input').value.trim();
+  if (!input) { document.getElementById('ai-input').focus(); return; }
+  const loading = document.getElementById('ai-loading');
+  const result  = document.getElementById('ai-result');
+  const addBtn  = document.getElementById('ai-add-btn');
+  loading.style.display = 'flex';
+  result.style.display  = 'none';
+  addBtn.style.display  = 'none';
+  aiCache = null;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        system: `You are a pharmaceutical manufacturing expert specialising in GMP batch record design and MES recipe implementation (Werum PAS-X).
+When given a manufacturing step description, respond ONLY in this exact structured format (no markdown, no extra text):
+
+STEP TYPE: [one of: dispense / mix / granulate / dry / mill / lubricate / compress / coat / inspect / pack / hold / sample]
+TITLE: [concise step title, max 8 words]
+PARAMETERS:
+- [Parameter name]: [realistic value with unit]
+- [Parameter name]: [realistic value with unit]
+- [Parameter name]: [realistic value with unit]
+- [Parameter name]: [realistic value with unit]
+EQUIPMENT: [equipment name and model]
+GMP NOTE: [one specific GMP/cGMP compliance note, max 20 words]
+
+Use realistic pharmaceutical values. Be specific and practical.`,
+        messages: [{ role: 'user', content: input }]
+      })
+    });
+
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const data = await res.json();
+    const text = data.content?.[0]?.text;
+    if (!text) throw new Error('Empty response');
+    aiCache = text;
+    result.textContent = text;
+    result.style.display = 'block';
+    addBtn.style.display = 'block';
+    logAudit('INSERT','ai_assistant',`AI parameters generated for: ${input.slice(0,60)}`,null);
+
+  } catch (err) {
+    // Fallback: realistic mock response for demo
+    const mock = generateMockAI(input);
+    aiCache = mock;
+    result.textContent = mock;
+    result.style.display = 'block';
+    addBtn.style.display = 'block';
+    logAudit('INSERT','ai_assistant',`AI parameters generated (demo mode): ${input.slice(0,60)}`,null);
+  }
+  loading.style.display = 'none';
+}
+
+function generateMockAI(input) {
+  const lower = input.toLowerCase();
+
+  if (lower.includes('granulat')) return `STEP TYPE: granulate
+TITLE: High shear wet granulation endpoint control
+PARAMETERS:
+- Impeller speed: 250 rpm
+- Chopper speed: 1500 rpm
+- Granulation endpoint (power): 32 kW
+- Binder addition rate: 200 g/min
+EQUIPMENT: Diosna P600 HSG-02
+GMP NOTE: Record power consumption profile every 2 min; endpoint deviation requires immediate QA notification.`;
+
+  if (lower.includes('compress')) return `STEP TYPE: compress
+TITLE: Tablet compression IPC monitoring
+PARAMETERS:
+- Target hardness: 80–120 N
+- Average tablet weight: 750 ± 15 mg
+- Tablet thickness: 5.2 ± 0.2 mm
+- Compression speed: 45 rpm
+EQUIPMENT: Fette 3090i Tablet Press-04
+GMP NOTE: Perform IPC checks every 15 min; reject and quarantine out-of-spec tablets immediately.`;
+
+  if (lower.includes('dry') || lower.includes('fluid bed')) return `STEP TYPE: dry
+TITLE: Fluid bed drying LOD endpoint control
+PARAMETERS:
+- Inlet air temperature: 60 °C
+- Outlet air temperature: 40 °C
+- LOD target: ≤ 2.5%
+- Air flow rate: 1200 m³/h
+EQUIPMENT: Glatt GPCG-120 FBD-01
+GMP NOTE: Sample every 15 min for LOD by Karl Fischer; do not proceed until endpoint confirmed.`;
+
+  if (lower.includes('dispens') || lower.includes('weigh')) return `STEP TYPE: dispense
+TITLE: API dispensing with second-person verification
+PARAMETERS:
+- Target quantity: 55.0 kg
+- Tolerance: ± 2.0%
+- Material ID: SAP-88210
+- Tare weight: 0.00 kg
+EQUIPMENT: Dispensing Booth A — Mettler Toledo IND780
+GMP NOTE: Second-person verification mandatory; verify CoA and sieve analysis before dispensing.`;
+
+  if (lower.includes('coat')) return `STEP TYPE: coat
+TITLE: Opadry II film coating weight gain
+PARAMETERS:
+- Inlet air temperature: 58 °C
+- Pan speed: 8 rpm
+- Weight gain target: 3.0%
+- Spray rate: 120 g/min
+EQUIPMENT: Glatt GMPC-600 Coating Pan
+GMP NOTE: Monitor weight gain continuously; suspend coating if inlet temp deviates ±5°C from setpoint.`;
+
+  if (lower.includes('mill') || lower.includes('grind')) return `STEP TYPE: mill
+TITLE: Dried granule milling particle size control
+PARAMETERS:
+- Screen aperture: 1.0 mm
+- Feed rate: 80 kg/h
+- Rotor speed: 1200 rpm
+- Yield target: ≥ 98%
+EQUIPMENT: Quadro Comil 197S Mill-02
+GMP NOTE: Monitor for overheating; check particle size distribution every 20 min by sieve analysis.`;
+
+  if (lower.includes('lubricat') || lower.includes('blend')) return `STEP TYPE: lubricate
+TITLE: Final blend lubrication magnesium stearate
+PARAMETERS:
+- Duration: 5 min
+- Blender speed: 12 rpm
+- Blend quantity: 98.5 kg
+- Lubricant level: 0.5% w/w
+EQUIPMENT: IBC Bin Blender BB-300
+GMP NOTE: Over-blending reduces tablet hardness; do not exceed specified duration under any circumstance.`;
+
+  if (lower.includes('inspect') || lower.includes('ipc')) return `STEP TYPE: inspect
+TITLE: In-process control tablet inspection
+PARAMETERS:
+- Parameter / test: Hardness, Friability, Dissolution
+- Lower spec limit: 80 N / ≤ 1.0% / ≥ 80% Q
+- Upper spec limit: 120 N / — / —
+- Sample size (n): 10 tablets per check
+EQUIPMENT: Erweka TBH 425 hardness tester
+GMP NOTE: Document all OOS results immediately; do not release batch until investigation completed.`;
+
+  if (lower.includes('pack') || lower.includes('label')) return `STEP TYPE: pack
+TITLE: Primary packaging blister line setup
+PARAMETERS:
+- Pack configuration: 10 × 10 blister
+- Line speed: 120 units/min
+- Sealing temperature: 180 °C
+- Lot number: per batch record
+EQUIPMENT: Uhlmann UPS4 Blister Line BL-01
+GMP NOTE: Verify label reconciliation 100%; retain printed labels sample per SOP-PKG-007.`;
+
+  // Default
+  return `STEP TYPE: sample
+TITLE: In-process quality control sampling
+PARAMETERS:
+- Sampling point: Mid-batch
+- Sample quantity: 3 × 50 g
+- Test method: USP <905> Content Uniformity
+- Acceptance criteria: RSD ≤ 5.0%
+EQUIPMENT: Stainless steel sampling thief ST-200
+GMP NOTE: Label samples immediately with step number, time, and operator ID per SOP-QC-012.`;
+}
+
+function addFromAI() {
+  if (!aiCache) return;
+  const text = aiCache;
+  const typeMatch  = text.match(/STEP TYPE:\s*(\w+)/i);
+  const titleMatch = text.match(/TITLE:\s*(.+)/i);
+  const equipMatch = text.match(/EQUIPMENT:\s*(.+)/i);
+  const noteMatch  = text.match(/GMP NOTE:\s*(.+)/i);
+  const rawType = typeMatch ? typeMatch[1].toLowerCase().trim() : 'mix';
+  const type    = STEPS_CFG[rawType] ? rawType : 'mix';
+  const title   = titleMatch ? titleMatch[1].trim() : 'AI-generated step';
+  const notes   = noteMatch  ? noteMatch[1].trim()  : '';
+  const params  = {};
+  const paramBlock = text.match(/PARAMETERS:([\s\S]*?)(?:EQUIPMENT:|GMP NOTE:|$)/i);
+  if (paramBlock) {
+    paramBlock[1].trim().split('\n').forEach(line => {
+      const m = line.match(/^[-•*]\s*(.+?):\s*(.+)/);
+      if (m) {
+        const key = m[1].trim().toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,12);
+        params[key] = m[2].trim();
+      }
+    });
+  }
+  if (equipMatch) params['equip'] = equipMatch[1].trim();
+  steps.push({ type, title, params, notes, critical:['granulate','compress','dispense'].includes(type), doubleCheck:['dispense','inspect'].includes(type), pvl:[], deviations:[] });
+  logAudit('INSERT','step',`AI-generated step added: ${title}`, null);
+  renderSteps();
+  switchTab('recipe');
+}
+
+/* ═══════════════════════════════════════════
+   INITIALISE — SAMPLE DATA
+   ─────────────────────────────────────────────
+   This section pre-loads a demo MBR for Metformin HCl
+   so the app opens with real pharma content to show
+   during an interview.
+
+   TO CHANGE THE DEFAULT PRODUCT:
+     Edit the steps[] array below — each step needs:
+       type        : key from STEPS_CFG (e.g. 'dispense')
+       title       : description shown in the step header
+       params      : object matching STEP_FIELDS keys
+       notes       : GMP remarks / operator instructions
+       critical    : true | false
+       doubleCheck : true | false
+       pvl         : array of { name, min, target, max, unit }
+       deviations  : [] (start empty)
+
+   TO START WITH AN EMPTY MBR:
+     Replace steps = [...] with steps = [];
+═══════════════════════════════════════════ */
+// Set today's date on date fields
+document.addEventListener('DOMContentLoaded', () => {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('ebr-date').value = today;
+});
+
+steps = [
+  {
+    type: 'dispense',
+    title: 'Dispense Metformin HCl API',
+    params: { mat_id: 'MET-001 / SAP-88210', qty: '55.0', tol: '± 2.0', equip: 'Dispensing Booth A' },
+    notes: 'Verify CoA and sieve analysis before dispensing. Requires second-person verification.',
+    critical: true, doubleCheck: true,
+    pvl: [
+      { name:'Quantity', min:'53.9', target:'55.0', max:'56.1', unit:'kg' },
+      { name:'Tolerance', min:'', target:'± 2.0', max:'', unit:'%' }
+    ],
+    deviations: []
+  },
+  {
+    type: 'granulate',
+    title: 'High shear wet granulation',
+    params: { imp: '250', chop: '1500', endpt: '32', equip: 'Diosna P600 HSG-02' },
+    notes: 'Monitor granulation endpoint by power consumption. Critical process parameter — record torque profile.',
+    critical: true, doubleCheck: false,
+    pvl: [
+      { name:'Impeller Speed', min:'200', target:'250', max:'300', unit:'rpm' },
+      { name:'Endpoint Power', min:'30', target:'32', max:'35', unit:'kW' }
+    ],
+    deviations: []
+  },
+  {
+    type: 'dry',
+    title: 'Fluid bed drying',
+    params: { inlet: '60', outlet: '40', lod: '≤ 2.5', equip: 'Glatt GPCG-120 FBD-01' },
+    notes: 'LOD determination by Karl Fischer method. Sample every 15 min until endpoint reached.',
+    critical: false, doubleCheck: false,
+    pvl: [
+      { name:'Inlet Temp', min:'55', target:'60', max:'65', unit:'°C' },
+      { name:'LOD Target', min:'', target:'≤ 2.5', max:'', unit:'%' }
+    ],
+    deviations: []
+  },
+  {
+    type: 'compress',
+    title: 'Tablet compression',
+    params: { hard: '80–120', thick: '5.2 ± 0.2', wt: '750 ± 15', equip: 'Fette 3090i Press-04' },
+    notes: 'IPC checks every 15 min. Reject and quarantine tablets outside acceptance criteria.',
+    critical: true, doubleCheck: false,
+    pvl: [
+      { name:'Hardness', min:'80', target:'100', max:'120', unit:'N' },
+      { name:'Weight', min:'735', target:'750', max:'765', unit:'mg' },
+      { name:'Thickness', min:'5.0', target:'5.2', max:'5.4', unit:'mm' }
+    ],
+    deviations: []
+  },
+];
+
+// Seed audit log
+logAudit('INSERT','batch_record','MBR created: Metformin HCl 500mg Tablets – MBR-2024-001','Dhruvi Lad');
+logAudit('INSERT','step','Initial 4 steps loaded from template','system');
+
+renderSteps();
+
+/* ═══════════════════════════════════════════
+   DOWNLOAD JSON
+   ─────────────────────────────────────────────
+   Creates a Blob from the JSON in the modal code block
+   and triggers a browser file download.
+   Filename is chosen automatically based on export type.
+
+   TO CHANGE the filename format:
+     Edit the filename variable in downloadJSON()
+═══════════════════════════════════════════ */
+function downloadJSON() {
+  const code = document.getElementById('modal-code').textContent;
+  const titleEl = document.getElementById('modal-title').textContent;
+  const filename = titleEl.includes('Traceability') ? 'traceability-matrix.json'
+    : titleEl.includes('Executed') ? 'executed-batch-record.json'
+    : 'master-batch-record.json';
+  const blob = new Blob([code], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`Downloaded: ${filename} ✓`);
+}
+
+/* ═══════════════════════════════════════════
+   IMPORT JSON
+   ─────────────────────────────────────────────
+   importJSON() reads a .json file the user selects,
+   validates it is a TraceKit export (must have
+   document_type + steps fields), then restores:
+     - MBR title, version, product code, batch size, author
+     - All steps with parameters, PVL, deviations, flags
+
+   The file input is hidden — triggerImport() clicks it
+   programmatically when the Import button is pressed.
+
+   TO ADD MORE FIELDS to import:
+     Read from data.yourField and set the DOM element value
+     inside the reader.onload callback in importJSON()
+═══════════════════════════════════════════ */
+function triggerImport() {
+  document.getElementById('import-file').click();
+}
+
+function importJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  if (!file.name.endsWith('.json')) {
+    showToast('Please upload a valid .json file');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+
+      // Validate it's a TraceKit JSON
+      if (!data.document_type || !data.steps) {
+        showToast('❌ Invalid file — not a TraceKit JSON');
+        return;
+      }
+
+      // Load MBR metadata
+      if (data.mbr_title) document.getElementById('mbr-title').value = data.mbr_title;
+      if (data.mbr_version) document.getElementById('mbr-version').value = data.mbr_version;
+      if (data.product_code) document.getElementById('product-code').value = data.product_code;
+      if (data.batch_size) document.getElementById('batch-size').value = data.batch_size;
+      if (data.author) document.getElementById('mbr-author').value = data.author;
+      if (data.status) {
+        mbrStatus = data.status;
+        const labels = { draft:'Draft', under_review:'Under Review', approved:'Approved', obsolete:'Obsolete' };
+        document.getElementById('current-status-label').innerHTML = `Current: <strong>${labels[data.status] || data.status}</strong>`;
+      }
+
+      // Load steps
+      steps = data.steps.map(s => ({
+        type: Object.keys(STEPS_CFG).find(k => STEPS_CFG[k].label === s.operation_type) || 'mix',
+        title: s.description || s.mbr_step_description || '',
+        params: s.parameters || {},
+        notes: s.gmp_notes || '',
+        critical: s.critical_step || false,
+        doubleCheck: s.requires_double_check || false,
+        pvl: s.pvl || [],
+        deviations: s.deviations || []
+      }));
+
+      logAudit('INSERT','import',`JSON imported: ${file.name} (${steps.length} steps)`,
+        document.getElementById('mbr-author').value);
+      renderSteps();
+      showToast(`✅ Imported successfully: ${file.name} (${steps.length} steps)`);
+
+    } catch (err) {
+      showToast('❌ Failed to parse JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  // Reset input so same file can be re-imported
+  event.target.value = '';
+}
+
+
+/* ═══════════════════════════════════════════
+   DOWNLOAD PDF — GMP Batch Record Report
+═══════════════════════════════════════════ */
+function downloadPDF() {
+  const mbrTitle = document.getElementById('mbr-title').value;
+  const productCode = document.getElementById('product-code').value;
+  const version = document.getElementById('mbr-version').value;
+  const batchSize = document.getElementById('batch-size').value;
+  const author = document.getElementById('mbr-author').value;
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-CA');
+  const timeStr = now.toLocaleTimeString();
+  const statusLabels = { draft:'DRAFT', under_review:'UNDER REVIEW', approved:'APPROVED', obsolete:'OBSOLETE' };
+  const statusColors = { draft:'#475569', under_review:'#d97706', approved:'#15803d', obsolete:'#dc2626' };
+  const currentStatus = statusLabels[mbrStatus] || 'DRAFT';
+  const statusColor = statusColors[mbrStatus] || '#475569';
+
+  const totalDeviations = steps.reduce((acc, s) => acc + (s.deviations||[]).length, 0);
+  const criticalSteps = steps.filter(s => s.critical).length;
+
+  // Build steps HTML
+  const stepsHTML = steps.map((step, i) => {
+    const cfg = {
+      dispense:'#2563eb', mix:'#7c3aed', granulate:'#0891b2', dry:'#d97706',
+      mill:'#059669', lubricate:'#65a30d', compress:'#dc2626', coat:'#db2777',
+      inspect:'#6d28d9', pack:'#0f766e', hold:'#92400e', sample:'#374151'
+    };
+    const labels = {
+      dispense:'Dispense', mix:'Mix / Blend', granulate:'Granulate', dry:'Dry',
+      mill:'Mill', lubricate:'Lubricate', compress:'Compress', coat:'Coat',
+      inspect:'IPC Inspect', pack:'Pack / Label', hold:'Hold / Wait', sample:'Sample / QC'
+    };
+    const color = cfg[step.type] || '#374151';
+    const label = labels[step.type] || step.type;
+
+    const paramsHTML = Object.entries(step.params||{})
+      .filter(([,v]) => v)
+      .map(([k,v]) => `<tr><td style="padding:4px 8px;color:#6b7280;font-size:11px;border-bottom:1px solid #f1f5f9">${k.replace(/_/g,' ')}</td><td style="padding:4px 8px;font-size:11px;font-weight:600;border-bottom:1px solid #f1f5f9">${v}</td></tr>`)
+      .join('');
+
+    const pvlHTML = (step.pvl||[]).length > 0 ? `
+      <div style="margin-top:8px">
+        <div style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px">Parameter Value List (PVL)</div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <tr style="background:#f8f9fa">
+            <th style="padding:4px 8px;text-align:left;color:#6b7280;font-size:10px">Parameter</th>
+            <th style="padding:4px 8px;text-align:center;color:#6b7280;font-size:10px">Min</th>
+            <th style="padding:4px 8px;text-align:center;color:#6b7280;font-size:10px">Target</th>
+            <th style="padding:4px 8px;text-align:center;color:#6b7280;font-size:10px">Max</th>
+            <th style="padding:4px 8px;text-align:center;color:#6b7280;font-size:10px">Unit</th>
+          </tr>
+          ${(step.pvl||[]).map(p => `
+            <tr style="border-bottom:1px solid #f1f5f9">
+              <td style="padding:4px 8px;font-weight:600">${p.name||''}</td>
+              <td style="padding:4px 8px;text-align:center;color:#dc2626">${p.min||'—'}</td>
+              <td style="padding:4px 8px;text-align:center;color:#15803d;font-weight:700">${p.target||'—'}</td>
+              <td style="padding:4px 8px;text-align:center;color:#dc2626">${p.max||'—'}</td>
+              <td style="padding:4px 8px;text-align:center;color:#6b7280">${p.unit||''}</td>
+            </tr>
+          `).join('')}
+        </table>
+      </div>` : '';
+
+    const devsHTML = (step.deviations||[]).length > 0 ? `
+      <div style="margin-top:8px;background:#fff5f5;border:1px solid #fca5a5;border-radius:6px;padding:8px">
+        <div style="font-size:10px;font-weight:700;color:#dc2626;text-transform:uppercase;margin-bottom:4px">⚠ Deviations (${step.deviations.length})</div>
+        ${step.deviations.map((d,j) => `
+          <div style="font-size:11px;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid #fecaca">
+            <strong>DEV-${String(j+1).padStart(3,'0')}</strong> [${d.severity||'minor'}] — ${d.type||''}: ${d.desc||''}
+            ${d.capa ? `<span style="color:#d97706"> · CAPA: ${d.capa}</span>` : ''}
+          </div>
+        `).join('')}
+      </div>` : '';
+
+    return `
+      <div style="margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;break-inside:avoid">
+        <div style="background:${color};padding:10px 14px;display:flex;align-items:center;gap:10px">
+          <div style="width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,0.25);display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;flex-shrink:0">${i+1}</div>
+          <div style="color:#fff;font-weight:600;font-size:13px;flex:1">${step.title||label+' step'}</div>
+          <div style="color:rgba(255,255,255,0.85);font-size:11px">${label}</div>
+          ${step.critical ? '<div style="background:rgba(255,255,255,0.2);color:#fff;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600">⚠ CRITICAL</div>' : ''}
+          ${step.doubleCheck ? '<div style="background:rgba(255,255,255,0.2);color:#fff;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600">✓✓ 2ND CHECK</div>' : ''}
+        </div>
+        <div style="padding:12px 14px;background:#fff">
+          ${paramsHTML ? `<table style="width:100%;border-collapse:collapse">${paramsHTML}</table>` : ''}
+          ${step.notes ? `<div style="margin-top:8px;background:#f8f9fa;border-left:3px solid ${color};padding:6px 10px;font-size:11px;color:#374151"><strong>GMP Note:</strong> ${step.notes}</div>` : ''}
+          <div style="display:flex;gap:8px;margin-top:8px;font-size:10px;color:#6b7280">
+            <span>Ref: PMF-§${String(i+1).padStart(3,'0')}</span>
+            <span>·</span>
+            <span>Step ID: STEP-${String(i+1).padStart(3,'0')}</span>
+          </div>
+          ${pvlHTML}
+          ${devsHTML}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Build sign-off table
+  const signoffHTML = signoffs.length > 0
+    ? signoffs.map(s => `<tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb">${s.role}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-weight:600">${s.name}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-size:11px">${s.time.toISOString()}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="3" style="padding:12px;color:#9ca3af;text-align:center">No sign-offs recorded</td></tr>`;
+
+  // Traceability table
+  const traceHTML = steps.map((step, i) => {
+    const labels = {
+      dispense:'Dispense', mix:'Mix / Blend', granulate:'Granulate', dry:'Dry',
+      mill:'Mill', lubricate:'Lubricate', compress:'Compress', coat:'Coat',
+      inspect:'IPC Inspect', pack:'Pack / Label', hold:'Hold / Wait', sample:'Sample / QC'
+    };
+    const status = ['dispense'].includes(step.type) ? 'Verified'
+      : ['inspect','sample'].includes(step.type) ? 'Requires Review' : 'Pending';
+    const statusBg = status === 'Verified' ? '#dcfce7' : status === 'Requires Review' ? '#fffbeb' : '#f1f5f9';
+    const statusFg = status === 'Verified' ? '#15803d' : status === 'Requires Review' ? '#d97706' : '#475569';
+    const keyParam = Object.values(step.params||{}).find(v=>v) || '—';
+    return `<tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:6px 10px;text-align:center;font-weight:700">${i+1}</td>
+      <td style="padding:6px 10px;font-size:11px">${step.title||''}</td>
+      <td style="padding:6px 10px;font-family:monospace;font-size:10px;color:#6b7280">PMF-§${String(i+1).padStart(3,'0')}</td>
+      <td style="padding:6px 10px;font-size:11px">${labels[step.type]||step.type}</td>
+      <td style="padding:6px 10px;text-align:center">${step.critical?'<span style="color:#dc2626;font-weight:700">⚠ Yes</span>':'—'}</td>
+      <td style="padding:6px 10px;font-size:11px;color:#6b7280">${keyParam}</td>
+      <td style="padding:6px 10px"><span style="background:${statusBg};color:${statusFg};padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600">${status}</span></td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>${mbrTitle}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color: #1a1a2e; font-size: 13px; line-height: 1.5; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none; }
+  }
+</style>
+</head>
+<body style="padding:0;background:#f8f9fa">
+
+<!-- Print button -->
+<div class="no-print" style="position:fixed;top:16px;right:16px;z-index:999;display:flex;gap:8px">
+  <button onclick="window.print()" style="padding:8px 20px;background:#0A3D6B;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" style="padding:8px 16px;background:#fff;border:1px solid #e5e7eb;border-radius:6px;cursor:pointer;font-size:13px">Close</button>
+</div>
+
+<div style="max-width:900px;margin:0 auto;padding:32px 24px">
+
+  <!-- Header -->
+  <div style="background:#0A3D6B;color:#fff;border-radius:12px;padding:24px 28px;margin-bottom:24px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+      <div>
+        <div style="font-size:11px;opacity:0.7;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">TraceKit v2 — GMP Batch Record Platform</div>
+        <div style="font-size:22px;font-weight:700;line-height:1.2;margin-bottom:4px">${mbrTitle}</div>
+        <div style="font-size:13px;opacity:0.8">Master Batch Record · ${productCode}</div>
+      </div>
+      <div style="text-align:right;flex-shrink:0;margin-left:20px">
+        <div style="background:${statusColor};color:#fff;padding:4px 14px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:8px;display:inline-block">${currentStatus}</div>
+        <div style="font-size:11px;opacity:0.7">Version ${version}</div>
+        <div style="font-size:11px;opacity:0.7">${dateStr} ${timeStr}</div>
+      </div>
+    </div>
+    <!-- KPI strip -->
+    <div style="display:flex;gap:20px;margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.2)">
+      <div><div style="font-size:20px;font-weight:700">${steps.length}</div><div style="font-size:10px;opacity:0.7;text-transform:uppercase">Total Steps</div></div>
+      <div><div style="font-size:20px;font-weight:700">${criticalSteps}</div><div style="font-size:10px;opacity:0.7;text-transform:uppercase">Critical Steps</div></div>
+      <div><div style="font-size:20px;font-weight:700">${totalDeviations}</div><div style="font-size:10px;opacity:0.7;text-transform:uppercase">Deviations</div></div>
+      <div><div style="font-size:20px;font-weight:700">${signoffs.length}</div><div style="font-size:10px;opacity:0.7;text-transform:uppercase">Sign-offs</div></div>
+    </div>
+  </div>
+
+  <!-- Metadata -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:24px">
+    ${[['Product Code',productCode],['Batch Size',batchSize],['Author',author],['Generated',dateStr]].map(([l,v])=>`
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px">
+        <div style="font-size:10px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px">${l}</div>
+        <div style="font-size:13px;font-weight:600">${v}</div>
+      </div>`).join('')}
+  </div>
+
+  <!-- 21 CFR Part 11 banner -->
+  <div style="background:#e8f0fe;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:24px;font-size:11px;color:#1d4ed8">
+    🔒 <strong>21 CFR Part 11 Simulation</strong> — Electronic records &amp; audit trail enabled. All changes logged with timestamp and user identity.
+  </div>
+
+  <!-- Process Steps -->
+  <div style="margin-bottom:28px">
+    <div style="font-size:16px;font-weight:700;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #0A3D6B;color:#0A3D6B">
+      📋 Process Steps (${steps.length})
+    </div>
+    ${stepsHTML || '<div style="color:#9ca3af;padding:20px;text-align:center">No steps defined</div>'}
+  </div>
+
+  <!-- Traceability Matrix -->
+  <div style="margin-bottom:28px">
+    <div style="font-size:16px;font-weight:700;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #0A3D6B;color:#0A3D6B">
+      🔗 Traceability Matrix
+    </div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:#f8f9fa">
+            <th style="padding:8px 10px;text-align:center;color:#6b7280;font-size:10px;text-transform:uppercase">#</th>
+            <th style="padding:8px 10px;text-align:left;color:#6b7280;font-size:10px;text-transform:uppercase">MBR Step</th>
+            <th style="padding:8px 10px;text-align:left;color:#6b7280;font-size:10px;text-transform:uppercase">Paper Formula Ref</th>
+            <th style="padding:8px 10px;text-align:left;color:#6b7280;font-size:10px;text-transform:uppercase">Operation</th>
+            <th style="padding:8px 10px;text-align:center;color:#6b7280;font-size:10px;text-transform:uppercase">Critical</th>
+            <th style="padding:8px 10px;text-align:left;color:#6b7280;font-size:10px;text-transform:uppercase">Key Parameter</th>
+            <th style="padding:8px 10px;text-align:left;color:#6b7280;font-size:10px;text-transform:uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody>${traceHTML}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Sign-offs -->
+  <div style="margin-bottom:28px">
+    <div style="font-size:16px;font-weight:700;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #0A3D6B;color:#0A3D6B">
+      ✍️ Electronic Sign-offs (21 CFR Part 11)
+    </div>
+    <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:#f8f9fa">
+            <th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:10px;text-transform:uppercase">Role</th>
+            <th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:10px;text-transform:uppercase">Name</th>
+            <th style="padding:8px 12px;text-align:left;color:#6b7280;font-size:10px;text-transform:uppercase">Timestamp (UTC)</th>
+          </tr>
+        </thead>
+        <tbody>${signoffHTML}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div style="border-top:1px solid #e5e7eb;padding-top:16px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#9ca3af">
+    <div>TraceKit v2 — MES Recipe Designer · GMP Batch Record Platform</div>
+    <div>Generated: ${dateStr} ${timeStr} · ${mbrTitle}</div>
+  </div>
+
+</div>
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  if (win) {
+    win.onload = () => URL.revokeObjectURL(url);
+    showToast('PDF report opened — click Print / Save as PDF ✓');
+  } else {
+    showToast('Please allow popups to download PDF');
+  }
+}
+
+</script>
+</body>
+</html>
